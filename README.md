@@ -14,7 +14,8 @@ Found a posting somewhere else (Handshake, LinkedIn, a law firm's site)? **Check
 
 1. Download this repository: **Code › Download ZIP** on GitHub, then double-click the ZIP to unzip it. Or clone it with `git clone https://github.com/ToBeDecided/To-Be-Decided.git`.
 2. Open the folder and **double-click `start.command`**.
-   - If macOS says it "cannot be opened because it is from an unidentified developer", **right-click `start.command` › Open › Open**. You only need to do this once.
+   - If macOS blocks it ("cannot be opened because it is from an unidentified developer" or "Apple could not verify…"), open **System Settings › Privacy & Security**, scroll down and click **Open Anyway**. On macOS 14 and earlier you can instead right-click `start.command` › **Open** › **Open**. You only need to do this once.
+   - Or skip the warning entirely: open **Terminal**, type `bash ` (with a space), drag `start.command` into the Terminal window, and press Return.
 3. A Terminal window opens. The first run takes a minute or two to set things up; after that it starts in seconds. Your browser opens to the app automatically.
 4. Keep the Terminal window open while you use the app. Close it (or press Ctrl+C) to stop.
 
