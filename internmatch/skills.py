@@ -130,7 +130,9 @@ SKILLS: tuple[Skill, ...] = (
        "account management", "retail sales"),
     _s("Customer Service", "business", "client service", "client services", "customer support", "front desk",
        "guest services", "hospitality"),
-    _s("Human Resources", "business", "recruiting", "recruitment", "talent acquisition", "onboarding", "hr"),
+    _s("Human Resources", "business", "recruiting coordinator", "recruiting assistant", "recruiting intern",
+       "campus recruiting", "talent acquisition", "hr intern", "hr assistant", "hr generalist", "hris",
+       "employee relations", "benefits administration", "onboarding coordinator"),
     _s("Entrepreneurship", "business", "startup", "start-up", "small business", "co-founded", "founded a"),
     _s("Negotiation", "business", "negotiated", "negotiating", "negotiations"),
     # Marketing & communications
@@ -344,7 +346,7 @@ _BOILERPLATE_RX = re.compile(
     r"require sponsorship|sponsor (a |an )?(visa|immigration|employment)|work authorization|authorized to work|"
     r"benefits (include|package)|401\(?k\)?|paid time off|employee assistance|pay (range|transparency)|"
     r"(salary|compensation|base pay) range|applicant privacy|privacy (notice|policy)|recruitment fraud|"
-    r"recruiting scams?",
+    r"recruiting scams?|(contact|email|call|reach out to|notify) (our )?(human resources|hr)\b",
     re.I,
 )
 _SENTENCE_SPLIT_RX = re.compile(r"(?<=[.!?])\s+|\n+")

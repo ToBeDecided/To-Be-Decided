@@ -30,6 +30,8 @@ def test_common_false_positives_are_ignored():
     boilerplate = ("You will learn through classroom training, coaching and mentoring as part of our training "
                    "curriculum. Applicants must not require immigration sponsorship now or in the future.")
     assert extract_skills(boilerplate) == {}
+    assert "Human Resources" not in extract_skills("Our recruiting team will guide you through onboarding.")
+    assert "Human Resources" in extract_skills("Human Resources Intern, Acme. Supported campus recruiting.")
 
 
 
