@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Internship Matcher</title>
+  <meta name="description" content="Rate your resume and find the internships you're most likely to get interviews for.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%234f46e5'/%3E%3Cpath d='M9 17l4.5 4.5L23 11' stroke='white' stroke-width='3.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">
+        <svg viewBox="0 0 32 32"><rect width="32" height="32" rx="8"/><path d="M9 17l4.5 4.5L23 11"/></svg>
+      </span>
+      <span>Internship Matcher</span>
+    </div>
+    <div class="topbar-right">
+      <span class="listing-status" id="listingStatus"><span class="dot pending"></span>Loading listings…</span>
+      <button class="btn ghost small" id="refreshBtn" type="button" title="Download the latest postings">Refresh</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="panel form-panel">
+      <form id="form" novalidate>
+        <section class="form-section">
+          <h2><span class="step">1</span>Your resume</h2>
+          <label class="dropzone" id="dropzone">
+            <input type="file" id="resumeFile" accept=".pdf,.docx,.txt,.md">
+            <svg class="dz-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0l-4 4m4-4l4 4M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
+            <span class="dz-text" id="dzText"><strong>Drop your resume here</strong> or click to browse</span>
+            <span class="dz-hint">PDF, DOCX or TXT</span>
+          </label>
+          <details class="paste">
+            <summary>…or paste the text instead</summary>
+            <textarea id="resumeText" rows="8" placeholder="Paste your resume text here"></textarea>
+          </details>
+        </section>
+
+        <section class="form-section">
+          <h2><span class="step">2</span>About you</h2>
+          <div class="field-grid">
+            <label class="field">
+              <span>Graduation year</span>
+              <select id="gradYear"><option value="">From resume</option></select>
+            </label>
+            <label class="field">
+              <span>Degree</span>
+              <select id="degree">
+                <option value="">From resume</option>
+                <option value="bachelor">Bachelor's</option>
+                <option value="master">Master's</option>
+                <option value="phd">PhD</option>
+                <option value="mba">MBA</option>
+                <option value="associate">Associate's</option>
+                <option value="high_school">High school</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>GPA <em>(optional)</em></span>
+              <input id="gpa" type="number" min="0" max="4.3" step="0.01" placeholder="From resume">
+            </label>
+            <label class="field">
+              <span>Work authorization</span>
+              <select id="workAuth">
+                <option value="citizen">U.S. citizen</option>
+                <option value="authorized">Authorized, not a citizen</option>
+                <option value="needs_sponsorship">Need visa sponsorship</option>
+              </select>
+            </label>
+          </div>
+        </section>
+
+        <section class="form-section">
+          <h2><span class="step">3</span>What you're looking for</h2>
+          <div class="field">
+            <span>Term</span>
+            <div class="chips-input" id="termChips"><span class="muted small">Loading…</span></div>
+          </div>
+          <div class="field">
+            <span>Role types <em>(none = all)</em></span>
+            <div class="chips-input" id="categoryChips"></div>
+          </div>
+          <label class="field">
+            <span>Preferred locations</span>
+            <input id="locations" type="text" placeholder="e.g. NYC, Bay Area, Seattle, TX">
+          </label>
+          <div class="checks">
+            <label><input type="checkbox" id="remoteOk" checked> Remote counts as a match</label>
+            <label><input type="checkbox" id="locationStrict"> Only show my locations</label>
+          </div>
+          <label class="field">
+            <span>Posted within</span>
+            <select id="maxAge">
+              <option value="">Any time</option>
+              <option value="7">Last 7 days</option>
+              <option value="14">Last 14 days</option>
+              <option value="30">Last 30 days</option>
+              <option value="60">Last 60 days</option>
+            </select>
+          </label>
+        </section>
+
+        <details class="advanced">
+          <summary>Advanced options</summary>
+          <label class="field">
+            <span>Skills not on your resume</span>
+            <input id="extraSkills" type="text" placeholder="e.g. Go, Kubernetes">
+          </label>
+          <label class="field">
+            <span>Skip these companies</span>
+            <input id="excludeCompanies" type="text" placeholder="e.g. Acme, Initech">
+          </label>
+          <label class="field">
+            <span>Also search company job boards</span>
+            <input id="boards" type="text" placeholder="e.g. greenhouse:stripe, lever:palantir, ashby:ramp">
+          </label>
+          <label class="check-line"><input type="checkbox" id="enrich" checked> Fetch full job descriptions for top matches (sharper matching)</label>
+        </details>
+
+        <button type="submit" class="btn primary block" id="analyzeBtn">Rate my resume &amp; find internships</button>
+        <p class="privacy">Your resume is processed by this app on your computer. It's only sent to Claude if you run the optional AI review.</p>
+      </form>
+    </aside>
+
+    <section class="results" id="results" aria-live="polite">
+      <div class="empty-state">
+        <h1>Find the internships you'll actually hear back from</h1>
+        <p class="lead">Upload your resume and we'll grade it, show you exactly what to fix, and rank thousands of live internship postings by your odds of landing an interview.</p>
+        <ol class="how">
+          <li><strong>Resume score.</strong> A transparent rubric covering impact, experience, skills, academics and format, with specific fixes.</li>
+          <li><strong>Fit.</strong> Each posting is matched against your skills using its title, category and (when available) the full job description.</li>
+          <li><strong>Odds.</strong> Fit, your competitiveness against the company's selectivity, and how fresh the posting is. Results are split into <span class="tier tier-likely">Likely</span> <span class="tier tier-target">Target</span> <span class="tier tier-reach">Reach</span>.</li>
+        </ol>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

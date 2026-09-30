@@ -1,0 +1,29 @@
+Priya Natarajan
+priya.n@example.edu | 555-987-6543 | linkedin.com/in/priyan | github.com/priyan
+
+EDUCATION
+Tech Institute — Bachelor of Science in Electrical Engineering                 Expected May 2027
+GPA: 3.55/4.0 | Coursework: Digital Logic, Computer Architecture, Signals and Systems, Analog Circuits
+
+EXPERIENCE
+Hardware Engineering Intern, Northstar Semiconductor                           May 2026 – Aug 2026
+• Designed and verified a 32-bit AXI interconnect in SystemVerilog, closing timing at 450 MHz
+• Built UVM testbenches that caught 14 RTL bugs before tape-out, cutting verification time by 20%
+• Automated regression runs with Python scripts, reducing manual triage from 6 hours to 1 hour per week
+Embedded Systems Intern, GreenGrid Energy                                      Jun 2025 – Aug 2025
+• Developed FreeRTOS firmware in C for an STM32-based battery monitor sampling 16 cells at 1 kHz
+• Designed a 4-layer PCB in Altium and brought up the board with an oscilloscope and logic analyzer
+
+PROJECTS
+RISC-V CPU on FPGA | Verilog, Vivado
+• Implemented a 5-stage pipelined RISC-V core with hazard forwarding on a Xilinx FPGA at 100 MHz
+Audio Equalizer | MATLAB, DSP
+• Created a 10-band digital equalizer in MATLAB with real-time filtering at 48 kHz
+
+LEADERSHIP
+Electrical Lead, Formula SAE Electric Team                                     Sep 2024 – Present
+• Led a team of 6 designing the battery management system for a 300 V accumulator
+
+SKILLS
+Languages: Verilog, SystemVerilog, C, C++, Python, MATLAB
+Tools: Vivado, Altium, LTspice, Cadence Virtuoso, Oscilloscope, Git, Linux
