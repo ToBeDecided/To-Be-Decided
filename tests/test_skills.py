@@ -64,6 +64,8 @@ def test_classify_titles():
     assert classify("Newsroom Intern")[0] == "Media & Writing"
     assert classify("Intern, Product Analytics Leadership Development Program") == ("Consulting & Business", "weak")
     assert classify("GE Vernova - Aeroderivative Industrialization Internship")[1] == "off"
+    assert classify("2027 Summer Intern, Global Customer Research Intern")[0] == "Marketing & Communications"
+    assert classify("Research Intern")[0] == "Education & Research"
 
 
 def test_tracks_expand_to_categories():

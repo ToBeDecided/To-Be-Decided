@@ -54,7 +54,7 @@ def _bar(score: int, width: int = 20) -> str:
     return "█" * filled + "░" * (width - filled)
 
 
-def _print_report(res: AnalysisResult, show_all: bool) -> None:
+def _print_report(res: AnalysisResult, show_all: bool, explain: bool = False) -> None:
     r, p = res.resume, res.profile
     print(f"\nRESUME SCORE  {r.overall}/100  (grade {r.grade})    candidate strength {p.candidate_strength}/100"
           f"    level: {p.level}")
@@ -89,6 +89,12 @@ def _print_report(res: AnalysisResult, show_all: bool) -> None:
         print(f"  {m.tier:<7}{m.likelihood:>5}{m.match_score:>5}  {post.company[:25]:<26}{post.title[:43]:<44}"
               f"{loc[:21]:<22}{posted}{pay}")
         print(f"  {'':<17}{post.category} · {post.url}")
+        if explain:
+            pad = " " * 19
+            skills = ", ".join(sorted(post.skills, key=lambda k: -post.skills[k])[:10]) or "none found"
+            print(f"{pad}job board's label: {post.source_category or '(none)'}; posting asks for: {skills}")
+            print(f"{pad}you have: {', '.join(m.matched_skills[:8]) or '-'}; "
+                  f"missing: {', '.join(m.missing_skills[:6]) or '-'}")
 
 
 def _write_csv(res: AnalysisResult, path: str) -> None:
@@ -136,7 +142,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(res.model_dump(mode="json", exclude={"resume_text"}), indent=2))
     else:
-        _print_report(res, args.all)
+        _print_report(res, args.all, args.explain)
     if args.csv:
         _write_csv(res, args.csv)
         print(f"\nWrote {len(res.matches)} matches to {args.csv}", file=sys.stderr)
@@ -379,6 +385,8 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("--max-age", type=int, help="only postings from the last N days")
     a.add_argument("--top", type=int, default=25, help="size of the recommended list")
     a.add_argument("--all", action="store_true", help="print every eligible match, not just the shortlist")
+    a.add_argument("--explain", action="store_true",
+                   help="show why each posting got its area and fit (job board label, skills it asks for)")
     a.add_argument("--no-enrich", action="store_true", help="don't fetch job descriptions")
     a.add_argument("--json", action="store_true", help="print JSON instead of a report")
     a.add_argument("--csv", help="also write all matches to this CSV file")

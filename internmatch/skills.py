@@ -475,8 +475,8 @@ _STRONG_CATEGORY_RULES: tuple[tuple[str, str], ...] = (
      r"wealth management|asset management|capital markets|credit|underwrit|insurance|actuar|fp&a|\bm&a\b|"
      r"hedge fund|summer analyst|bookkeep|payroll|accounts? (payable|receivable)|\bbilling\b", "Finance & Accounting"),
     (r"marketing|\bbrand|advertis|communications|public relations|\bpr\b|social media|\bcontent\b|"
-     r"media relations|\bevents?\b|graphic design|\bgrowth\b|e-?commerce|digital media|publicity|influencer",
-     "Marketing & Communications"),
+     r"media relations|\bevents?\b|graphic design|\bgrowth\b|e-?commerce|digital media|publicity|influencer|"
+     r"(market|customer|consumer|user|ux) (research|insights)", "Marketing & Communications"),
     (r"human resources|\bhr\b|recruit(ing|er|ment)|talent acquisition|people (ops|operations)|category manag|"
      r"merchandis|\bbuyer\b|\bsales\b|account (executive|manager|management)|supply chain|procurement",
      "Consulting & Business"),
@@ -633,7 +633,8 @@ TITLE_RULES: tuple[tuple[str, str, tuple[tuple[str, ...], ...]], ...] = (
       ("Communication", "Data Entry", "Administrative Support"))),
     (r"supply chain|logistics|procurement|purchasing|merchandis|buying|retail|category manag", "Operations",
      (("Operations", "Data Analysis"), ("Excel",), ("Project Management", "Negotiation"))),
-    (r"marketing|\bbrand|\bgrowth\b|advertis|digital media|e-?commerce|partnerships", "Marketing",
+    (r"marketing|\bbrand|\bgrowth\b|advertis|digital media|e-?commerce|partnerships|"
+     r"(market|customer|consumer|user|ux) (research|insights)", "Marketing",
      (("Marketing", "Brand Marketing", "Content Creation", "Social Media"),
       ("Canva", "Adobe Creative Suite", "HubSpot", "Google Analytics", "SEO", "Email Marketing"),
       ("Copywriting", "Writing", "Market Research"))),

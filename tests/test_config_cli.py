@@ -70,9 +70,10 @@ def test_cli_analyze_offline(monkeypatch, capsys, rows, tmp_path):
     monkeypatch.setattr(SOURCES["themuse"], "fetch", fake_fetch)
     out_csv = tmp_path / "matches.csv"
     code = cli.main(["analyze", str(FIXTURES / "business_resume.txt"), "--track", "Business", "--no-enrich",
-                     "--csv", str(out_csv), "--top", "5"])
+                     "--csv", str(out_csv), "--top", "5", "--explain"])
     assert code == 0
     out = capsys.readouterr().out
     assert "RESUME SCORE" in out and "Riverbend Credit Union" in out
+    assert "Finance & Accounting · " in out and "job board's label: Accounting and Finance" in out
     assert out_csv.read_text().startswith("tier,odds,fit,employer")
     asyncio.set_event_loop(asyncio.new_event_loop())  # keep later tests' default loop usable
