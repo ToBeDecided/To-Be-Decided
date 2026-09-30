@@ -43,6 +43,7 @@ def _profile_from_args(args: argparse.Namespace) -> Profile:
         locations=args.location or [],
         remote_ok=not args.no_remote,
         location_strict=args.strict_location,
+        us_only=not args.include_international,
         extra_skills=[s.strip() for s in (args.skills or "").split(",") if s.strip()],
         max_age_days=args.max_age,
     )
@@ -368,6 +369,7 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("--location", action="append", help="preferred location, e.g. DC, NYC, Chicago, TX (repeatable)")
     a.add_argument("--strict-location", action="store_true", help="hide postings outside your locations")
     a.add_argument("--no-remote", action="store_true", help="don't treat remote roles as a location match")
+    a.add_argument("--include-international", action="store_true", help="also show postings outside the U.S.")
     a.add_argument("--grad-year", type=int)
     a.add_argument("--degree", choices=["high_school", "associate", "bachelor", "master", "phd", "mba", "jd"])
     a.add_argument("--gpa", type=float)

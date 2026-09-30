@@ -29,7 +29,14 @@ import httpx
 
 from . import config
 from .models import Posting
-from .skills import classify, classify_description, off_focus_employer
+from .skills import (
+    category_weights,
+    classify,
+    classify_description,
+    extract_skills,
+    off_focus_description,
+    off_focus_employer,
+)
 
 log = logging.getLogger(__name__)
 
@@ -151,23 +158,31 @@ def make_posting(
     category, how = classify(title)
     if how == "off":
         return None
+    skills = extract_skills(description) if description else {}
+    substantial = len(description.split()) >= 60
+    field_weight = max(category_weights(skills).values()) if skills else 0.0
+    if substantial and field_weight < 3 and off_focus_description(description) >= 2:
+        return None  # a technical/scientific role, whatever the title's buzzwords ("films", "communications")
     if how != "strong":
         if off_focus_employer(company):
             return None
         label_cat, label_how = classify(source_category)
         if label_how == "off" and how == "none":
             return None
-        # The source's own label ("Legal Services") beats a weak title guess like "analyst".
-        guess = label_cat if label_how == "strong" else hint_category or category or default_category
-        if how == "none" and description:
+        desc_cat, _ = classify_description(skills)
+        if how == "weak":
+            # "Operations Analyst" is a business role unless the job board's label is backed by the description.
+            if label_how == "strong" and (not substantial or category_weights(skills)[label_cat] >= 2):
+                category = label_cat
+        else:
             # The title says nothing about the field ("Summer Intern"), so let the description decide. Job boards'
             # own labels are noisy: when a full description shows no sign of the field, don't trust the label.
-            desc_cat, _ = classify_description(description)
+            guess = label_cat if label_how == "strong" else hint_category or default_category
             if desc_cat:
                 guess = desc_cat
-            elif len(description.split()) >= 60 and guess != default_category:
+            elif substantial and guess != default_category:
                 return None
-        category = guess
+            category = guess
     if category is None:
         return None
     pay_kind, pay_detail = pay if pay and pay[0] != "unknown" else detect_pay(f"{title}\n{description}")
@@ -186,6 +201,7 @@ def make_posting(
         pay_detail=pay_detail,
         deadline=_ts(deadline),
         source_category=source_category,
+        skills=skills,
     )
 
 
@@ -246,7 +262,7 @@ def parse_muse(data: dict[str, Any], query_category: str | None = None) -> list[
 async def fetch_muse(client: httpx.AsyncClient, settings: Callable[[str], str | None]) -> tuple[list[Posting], dict]:
     key = settings("themuse_api_key")
     base: list[tuple[str, Any]] = [("level", "Internship")] + ([("api_key", key)] if key else [])
-    sem = asyncio.Semaphore(4)
+    sem = asyncio.Semaphore(8)
     detail: dict[str, Any] = {}
 
     async def query(category: str | None, max_pages: int) -> list[Posting]:
@@ -795,6 +811,7 @@ class ListingStore:
                 continue
             if p.url in cache:
                 p.description = cache[p.url]
+                p.skills = extract_skills(p.description)
                 filled += bool(p.description)
                 continue
             src = detail_source(p.url)
@@ -841,6 +858,7 @@ class ListingStore:
             cache[posting.url] = res
             if res:
                 posting.description = res
+                posting.skills = extract_skills(res)
                 filled += 1
         self._write_json(self._descriptions_file, cache)
         return filled

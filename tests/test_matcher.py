@@ -177,6 +177,20 @@ def test_check_posting_flags_blockers(prelaw_text):
     assert none is None and ok.tier == "Likely"
 
 
+def test_us_only(prelaw_text):
+    def post(pid, *locs):
+        return Posting(id=pid, source="t", company=f"Co {pid}", title="Legal Intern", category="Legal",
+                       locations=list(locs))
+
+    posts = [post("milan", "Milan, Italy"), post("london", "London, United Kingdom"), post("ny", "New York, NY"),
+             post("mixed", "Toronto, Canada", "Boston, MA"), post("remote", "Flexible / Remote"), post("none")]
+    matches, excluded = rank(posts, candidate(prelaw_text, Profile()))
+    assert {m.posting.id for m in matches} == {"ny", "mixed", "remote", "none"}
+    assert excluded["outside US"] == 2
+    everywhere, _ = rank(posts, candidate(prelaw_text, Profile(us_only=False)))
+    assert len(everywhere) == 6
+
+
 def test_location_matching():
     def hit(prefs, loc):
         return location_match(Posting(id="x", source="t", company="c", title="t", locations=[loc]),

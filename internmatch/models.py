@@ -30,6 +30,7 @@ class Profile(BaseModel):
     locations: list[str] = Field(default_factory=list)
     remote_ok: bool = True
     location_strict: bool = False
+    us_only: bool = True  # hide postings located only outside the United States
     extra_skills: list[str] = Field(default_factory=list)
     exclude_companies: list[str] = Field(default_factory=list)
     max_age_days: int | None = Field(default=None, ge=1)
@@ -53,6 +54,7 @@ class Posting(BaseModel):
     pay_detail: str = ""
     deadline: datetime | None = None
     source_category: str = ""
+    skills: dict[str, int] = Field(default_factory=dict)  # extracted from the description once, at download time
 
     def age_days(self, now: datetime | None = None) -> float | None:
         if self.date_posted is None:

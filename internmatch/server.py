@@ -157,6 +157,8 @@ def create_app(store: ListingStore | None = None, allow_any_host: bool | None = 
         # The full list can run to thousands of rows; job descriptions are only needed for the shortlist.
         for m in payload["matches"]:
             m["posting"]["description"] = ""
+        for m in payload["matches"] + payload["recommended"]:
+            m["posting"]["skills"] = {}
         return payload
 
     @app.post("/api/check")

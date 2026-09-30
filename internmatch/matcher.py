@@ -157,6 +157,29 @@ def expand_locations(prefs: list[str]) -> list[str]:
     return list(dict.fromkeys(out))
 
 
+_FOREIGN = re.compile(
+    r"\b(canada|united kingdom|england|scotland|ireland|france|germany|spain|italy|portugal|netherlands|belgium|"
+    r"switzerland|austria|sweden|norway|denmark|finland|poland|czech|hungary|romania|greece|turkey|israel|"
+    r"united arab emirates|uae|saudi arabia|qatar|egypt|nigeria|kenya|south africa|india|pakistan|bangladesh|"
+    r"china|hong kong|taiwan|japan|korea|singapore|malaysia|indonesia|philippines|thailand|vietnam|australia|"
+    r"new zealand|mexico|brazil|argentina|chile|colombia|peru|luxembourg|serbia|ukraine|morocco|"
+    r"london|paris|berlin|munich|dublin|madrid|milan|amsterdam|zurich|tokyo|shanghai|beijing|shenzhen|seoul|"
+    r"sydney|melbourne|toronto|vancouver|montreal|bangalore|bengaluru|mumbai|hyderabad|dubai|são paulo|"
+    r"sao paulo|mexico city|budapest|warsaw|prague|lisbon|stockholm|copenhagen|oslo|ho chi minh city|manila|"
+    r"kuala lumpur|jakarta|bangkok|tel aviv|cairo|lagos|nairobi|johannesburg|cape town)\b",
+    re.I,
+)
+_US_HINT = re.compile(r"\b(united states|usa|u\.s\.?|us)\b|,\s*(" + "|".join(sorted(_STATE_CODES)) + r")\b|"
+                      + "|".join(re.escape(name) for name in US_STATES) + "|remote|flexible", re.I)
+
+
+def is_outside_us(p: Posting) -> bool:
+    """True when every listed location is clearly outside the United States. Unknown locations count as US."""
+    if not p.locations:
+        return False
+    return all(_FOREIGN.search(loc) and not _US_HINT.search(loc) for loc in p.locations)
+
+
 def is_remote(p: Posting) -> bool:
     return any(re.search(r"remote|flexible", loc, re.I) for loc in p.locations)
 
@@ -258,6 +281,8 @@ def eligibility(p: Posting, c: Candidate, now: datetime) -> str | None:
         return "category"
     if prof.paid_only and p.pay == "unpaid":
         return "unpaid"
+    if prof.us_only and is_outside_us(p):
+        return "outside US"
     if prof.location_strict and c.location_terms:
         if not location_match(p, c.location_terms) and not (prof.remote_ok and is_remote(p)):
             return "location"
@@ -305,7 +330,7 @@ def score_posting(p: Posting, c: Candidate, now: datetime) -> Match:
             missing.append("A foreign language" if g[0] == "@language" else g[0])
     group_score = satisfied / len(groups) if groups else None
 
-    desc_skills = extract_skills(p.description) if p.description else {}
+    desc_skills = p.skills or (extract_skills(p.description) if p.description else {})
     desc_score = None
     if desc_skills:
         hit = [s for s in desc_skills if s in c.skills]
@@ -478,7 +503,10 @@ def summarize_profile(c: Candidate, report: ResumeReport, excluded: Counter[str]
     if excluded.get("unpaid"):
         notes.append(f"Hid {excluded['unpaid']} unpaid postings.")
     if excluded.get("closed"):
-        notes.append(f"Hid {excluded['closed']} postings whose deadline has passed.")
+        notes.append(f"Hid {excluded['closed']} postings that have closed or are for a term that has already started.")
+    if excluded.get("outside US"):
+        notes.append(f"Hid {excluded['outside US']} postings outside the United States (change this under "
+                     "preferred locations).")
     strength = round(100 * c.strength)
     if strength >= 80:
         notes.append("Your profile is competitive even at selective employers. Don't skip the reaches.")

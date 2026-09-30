@@ -75,6 +75,27 @@ def test_titles_without_a_field_signal_use_the_description():
     assert lab == []
 
 
+def test_technical_roles_with_field_buzzwords_are_dropped():
+    tech = " ".join(["You will develop PVD chambers in our semiconductor fab. A degree in engineering is required,"
+                     " with experience in process engineering and MATLAB."] * 4)
+    films = parse_muse({"results": [muse_job(94, "College Intern - Process development for emerging films", "Applied",
+                                             "Management", contents=f"<p>{tech}</p>")]})
+    assert films == []
+    comms = " ".join(["Write press releases and social media content for our engineering teams; media relations,"
+                      " copywriting and AP style."] * 4)
+    kept = parse_muse({"results": [muse_job(95, "Engineering Communications Intern", "Acme", "Management",
+                                            contents=f"<p>{comms}</p>")]})
+    assert kept and kept[0].category == "Marketing & Communications"
+
+
+def test_weak_titles_keep_their_own_category_over_noisy_labels():
+    ops = " ".join(["Support store operations and supply chain planning. Build Excel reports on inventory."] * 6)
+    p = parse_muse({"results": [muse_job(96, "Field Supply Chain - Operations Manager Intern", "Walmart",
+                                         "Legal Services", contents=f"<p>{ops}</p>")]})
+    assert p[0].category == "Consulting & Business"  # not "Legal", despite the label
+    assert "Excel" in p[0].skills  # skills are extracted once, at download time
+
+
 def test_detect_pay():
     assert detect_pay("Pay: $18-$22 per hour") == ("paid", "$18-$22 per hour")
     assert detect_pay("Interns earn $25 an hour") == ("paid", "$25 an hour")

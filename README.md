@@ -49,7 +49,7 @@ The app works out of the box with **The Muse**. Two free keys add many more list
 | **Adzuna** | A large aggregator of listings from across the web: legal, finance, consulting, marketing, creative, teaching and nonprofit internships | Free: [developer.adzuna.com/signup](https://developer.adzuna.com/signup) |
 | Employer job boards | Every internship at a specific employer that uses Greenhouse, Lever or Ashby | Add `greenhouse:employer` under *Advanced options* |
 
-Postings that are clearly tech, science or healthcare are filtered out so the list stays on-topic.
+Postings that are clearly tech, science or healthcare are filtered out so the list stays on-topic, and postings located only outside the United States are hidden unless you untick **United States only**.
 
 ## How the scoring works
 

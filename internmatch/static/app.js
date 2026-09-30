@@ -195,6 +195,7 @@ function readProfile() {
     locations: splitList($("#locations").value),
     remote_ok: $("#remoteOk").checked,
     location_strict: $("#locationStrict").checked,
+    us_only: $("#usOnly").checked,
     extra_skills: splitList($("#extraSkills").value),
     exclude_companies: splitList($("#excludeCompanies").value),
     max_age_days: num($("#maxAge").value),
@@ -217,6 +218,7 @@ function applyPrefs() {
   $("#locations").value = (p.locations || []).join(", ");
   $("#remoteOk").checked = p.remote_ok !== false;
   $("#locationStrict").checked = !!p.location_strict;
+  $("#usOnly").checked = p.us_only !== false;
   $("#extraSkills").value = (p.extra_skills || []).join(", ");
   $("#excludeCompanies").value = (p.exclude_companies || []).join(", ");
   $("#maxAge").value = p.max_age_days ? String(p.max_age_days) : "";

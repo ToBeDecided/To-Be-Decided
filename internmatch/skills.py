@@ -290,27 +290,31 @@ def canonical(name: str) -> str | None:
     return None
 
 
-_WORD = r"[a-z0-9]"
-
-
-def _alias_pattern(alias: str) -> str:
-    # Custom boundaries so "m&a" and "fp&a" match cleanly while "pr" doesn't match inside "april" or "pr&d".
-    return rf"(?<!{_WORD})(?<![&.]){re.escape(alias)}(?!{_WORD})(?![&])"
+# Tokens keep internal "&", "'", "." and "-" so "m&a", "raiser's", "monday.com" and "fact-checking" stay whole.
+# A second pass splits on hyphens so "policy-focused" still counts as "policy".
+_TOKEN_RX = re.compile(r"[a-z0-9]+(?:['&.-][a-z0-9]+)*")
+_TOKEN_NOHYPHEN_RX = re.compile(r"[a-z0-9]+(?:['&.][a-z0-9]+)*")
 
 
 @lru_cache(maxsize=1)
-def _compiled() -> list[tuple[Skill, re.Pattern[str] | None, re.Pattern[str] | None]]:
-    out = []
+def _alias_index() -> tuple[dict[tuple[str, ...], str], int]:
+    index: dict[tuple[str, ...], str] = {}
     for skill in SKILLS:
-        ci = re.compile("|".join(_alias_pattern(a) for a in skill.aliases)) if skill.aliases else None
-        cs = None
-        if skill.case_sensitive:
-            # Bare "R": must stand alone and not be an initial ("John R. Smith") or part of "R&D".
-            parts = [rf"(?<![\w+#./&-]){re.escape(a)}(?![\w+#&-])(?!\.\w)(?!\.\s+[A-Z][a-z])"
-                     for a in skill.case_sensitive]
-            cs = re.compile("|".join(parts))
-        out.append((skill, ci, cs))
-    return out
+        for alias in skill.aliases:
+            key = tuple(_TOKEN_RX.findall(alias))
+            if key:
+                index.setdefault(key, skill.name)
+    return index, max(len(k) for k in index)
+
+
+@lru_cache(maxsize=1)
+def _case_sensitive() -> list[tuple[str, re.Pattern[str]]]:
+    # Bare "R" / "Excel": must stand alone and not be an initial ("John R. Smith") or part of "R&D".
+    return [
+        (skill.name, re.compile("|".join(rf"(?<![\w+#./&-]){re.escape(a)}(?![\w+#&-])(?!\.\w)(?!\.\s+[A-Z][a-z])"
+                                         for a in skill.case_sensitive)))
+        for skill in SKILLS if skill.case_sensitive
+    ]
 
 
 def extract_languages(text: str) -> dict[str, int]:
@@ -330,19 +334,30 @@ def extract_languages(text: str) -> dict[str, int]:
 
 
 def extract_skills(text: str) -> dict[str, int]:
-    """Return {canonical skill name: mention count} found in ``text`` (languages included)."""
+    """Return {canonical skill name: mention count} found in ``text`` (languages included).
+
+    Matching is a dictionary lookup over word n-grams, so it stays fast on long job descriptions.
+    """
     if not text:
         return {}
-    lower = text.lower()
+    lower = text.lower().replace("\u2019", "'")
+    index, max_n = _alias_index()
+    hits: set[tuple[str, int]] = set()  # (skill, character offset): both tokenizations can find the same mention
+    for rx in (_TOKEN_RX, _TOKEN_NOHYPHEN_RX):
+        tokens = [(m.group(0), m.start()) for m in rx.finditer(lower)]
+        words = [t for t, _ in tokens]
+        for i, (_, pos) in enumerate(tokens):
+            for n in range(1, max_n + 1):
+                skill = index.get(tuple(words[i:i + n]))
+                if skill:
+                    hits.add((skill, pos))
     found: dict[str, int] = {}
-    for skill, ci, cs in _compiled():
-        n = 0
-        if ci is not None:
-            n += len(ci.findall(lower))
-        if cs is not None:
-            n += len(cs.findall(text))
+    for skill, _ in hits:
+        found[skill] = found.get(skill, 0) + 1
+    for name, rx in _case_sensitive():
+        n = len(rx.findall(text))
         if n:
-            found[skill.name] = n
+            found[name] = found.get(name, 0) + n
     for lang, n in extract_languages(text).items():
         found[lang] = found.get(lang, 0) + n
     return found
@@ -479,7 +494,18 @@ _OFF_FOCUS = re.compile(
     r"technician|mechanic|construction|welding|electrician|plumb|hvac|\bdriver|warehouse|\bcook\b|chef|culinary|"
     r"pilot|aviation|security guard|environmental|ecolog|wildlife|forestry|fisheries|biomedical|\bbio|nuclear|"
     r"\br&d\b|research and development|supplier quality|quality (engineer|assurance|control)|lawn|landscap|"
-    r"automotive|plant operations|field service|maintenance",
+    r"automotive|plant operations|field service|maintenance|patholog|anatom|histolog|specimen|diagnostic|"
+    r"hygien|\benv\b|\bconst\b|\bpvd\b|chips?\b|voltage|firmware|robotic",
+    re.I,
+)
+# Phrases in a job description that mark a technical, scientific or medical role.
+_OFF_FOCUS_DESCRIPTION = re.compile(
+    r"degree in (engineering|computer science|biology|chemistry|physics|environmental science|nursing|geology)|"
+    r"(engineering|computer science|biology|chemistry|physics|nursing) (degree|major|students?)|"
+    r"(mechanical|electrical|civil|chemical|industrial|software|process) engineering|environmental science|"
+    r"laboratory|clinical|patient care|programming languages|software development|construction management|"
+    r"industrial hygiene|semiconductor|manufacturing process|cad software|autocad|solidworks|matlab|"
+    r"python|java\b|c\+\+|machine learning|data science",
     re.I,
 )
 # Employers whose weakly-titled roles ("Intern, Year Round") are almost always technical.
@@ -515,14 +541,21 @@ def off_focus_employer(company: str) -> bool:
     return bool(company and _OFF_FOCUS_EMPLOYER.search(company))
 
 
-def classify_description(text: str) -> tuple[str | None, float]:
-    """Best-matching category for a job description, by weighted signature skills (category, weight)."""
-    if not text:
-        return None, 0.0
-    found = set(extract_skills(text[:8000]))
-    scores = {cat: sum(w for skill, w in sig.items() if skill in found) for cat, sig in CATEGORY_SIGNATURES.items()}
+def category_weights(skills: dict[str, int] | set[str]) -> dict[str, float]:
+    """How strongly a set of skills points at each category (sum of signature weights)."""
+    return {cat: sum(w for skill, w in sig.items() if skill in skills) for cat, sig in CATEGORY_SIGNATURES.items()}
+
+
+def classify_description(skills: dict[str, int] | set[str]) -> tuple[str | None, float]:
+    """Best-matching category for a job description's skills: (category or None if unclear, weight)."""
+    scores = category_weights(skills)
     best = max(scores, key=scores.get)
     return (best, scores[best]) if scores[best] >= 3 else (None, scores[best])
+
+
+def off_focus_description(text: str) -> int:
+    """How many distinct technical/scientific/medical phrases a description contains."""
+    return len({m.group(0).lower() for m in _OFF_FOCUS_DESCRIPTION.finditer(text[:8000])})
 
 
 def classify_title(title: str) -> str | None:
