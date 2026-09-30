@@ -446,7 +446,7 @@ CATEGORY_SIGNATURES: dict[str, dict[str, float]] = {
     },
     "Education & Research": {
         "Tutoring": 2.5, "Teaching": 2.5, "Youth Work": 1.5, "Academic Research": 3, "Research": 2,
-        "Qualitative Research": 1.5, "Survey Research": 1.5, "Statistics": 1.5, "SPSS": 1, "Stata": 1, "R": 0.5,
+        "Qualitative Research": 1.5, "Survey Research": 1.5, "Statistics": 0.5, "SPSS": 0.5, "Stata": 0.5, "R": 0.5,
         "Citation Management": 1, "Writing": 2, "Public Speaking": 1, "Publications": 1,
         "Conference Presentations": 1,
     },

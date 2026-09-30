@@ -173,8 +173,9 @@ def make_posting(
         # Generic asks (Office, research, writing, public speaking) show a posting is white-collar, not which field.
         specific = category_weights(skills, generic_weight=GENERIC_DISCOUNT)
         if how == "weak":
-            # "Operations Analyst" is a business role unless the job board's label is backed by the description.
-            if label_how == "strong" and (not substantial or specific[label_cat] >= 3):
+            # "Operations Analyst" is a business role unless the job board's label is clearly better backed by the
+            # description than the title's own field is.
+            if label_how == "strong" and (not substantial or specific[label_cat] >= max(3.0, specific[category] + 1.5)):
                 category = label_cat
         else:
             # The title says nothing about the field ("Summer Intern"), so let the description's specific skills

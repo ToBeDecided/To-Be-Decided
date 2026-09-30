@@ -98,6 +98,14 @@ def test_weak_titles_keep_their_own_category_over_noisy_labels():
     p = parse_muse({"results": [muse_job(99, "Operations Analyst - Corporate Physical Security", "Spectrum",
                                          "Legal Services", contents=f"<p>{security}</p>")]})
     assert p[0].category == "Consulting & Business"  # a passing mention of compliance isn't a legal role
+    analytics = " ".join(["Use SQL, Tableau and statistics to analyze product data; survey research."] * 6)
+    p = parse_muse({"results": [muse_job(100, "Intern, Product Analytics Leadership Program", "The Hartford",
+                                         "Education", contents=f"<p>{analytics}</p>")]})
+    assert p[0].category == "Consulting & Business"  # statistics don't make it an academic research role
+    legal = " ".join(["Legal research on Westlaw, draft legal memos and support litigation for our legal team."] * 6)
+    p = parse_muse({"results": [muse_job(101, "Operations Intern", "Acme", "Legal Services",
+                                         contents=f"<p>{legal}</p>")]})
+    assert p[0].category == "Legal"  # a well-backed label still wins
 
 
 def test_generic_descriptions_keep_the_job_boards_label():
