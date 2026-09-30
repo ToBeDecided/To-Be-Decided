@@ -28,7 +28,7 @@ from .skills import (
     TRACKS,
     canonical,
     categories_for,
-    extract_skills,
+    posting_skills,
     title_requirements,
 )
 from .sources import term_started
@@ -344,7 +344,7 @@ def score_posting(p: Posting, c: Candidate, now: datetime) -> Match:
             missing.append("A foreign language" if g[0] == "@language" else g[0])
     group_score = satisfied / len(groups) if groups else None
 
-    desc_skills = p.skills or (extract_skills(p.description) if p.description else {})
+    desc_skills = p.skills or posting_skills(p.description)
     desc_score = None
     if desc_skills:
         # Specific skills (Westlaw, AP style, valuation) say far more about fit than generic ones (Word, "research").

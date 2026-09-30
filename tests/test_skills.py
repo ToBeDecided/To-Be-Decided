@@ -5,6 +5,7 @@ from internmatch.skills import (
     classify_description,
     extract_languages,
     extract_skills,
+    posting_skills,
     title_requirements,
 )
 
@@ -29,6 +30,17 @@ def test_common_false_positives_are_ignored():
     boilerplate = ("You will learn through classroom training, coaching and mentoring as part of our training "
                    "curriculum. Applicants must not require immigration sponsorship now or in the future.")
     assert extract_skills(boilerplate) == {}
+
+
+
+def test_posting_boilerplate_is_ignored():
+    desc = ("Draft legal memos and conduct legal research on Westlaw.\n"
+            "We are an equal opportunity employer; all applicants are considered regardless of race, national origin, "
+            "heritage or veteran status. If you need a reasonable accommodation, contact Human Resources. "
+            "Benefits include employee assistance counseling. This role is not eligible for visa sponsorship.")
+    assert set(posting_skills(desc)) == {"Legal Writing", "Legal Research", "Research", "Westlaw"}
+    real = "Handle event planning and corporate sponsorships. Lead volunteer coordination and fundraising."
+    assert posting_skills(real) == extract_skills(real) != {}  # "sponsorships" here is the job, not visa boilerplate
 
 
 def test_languages_need_language_context():

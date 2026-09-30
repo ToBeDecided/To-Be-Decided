@@ -334,6 +334,32 @@ def extract_languages(text: str) -> dict[str, int]:
     return found
 
 
+# Sentences of legal and HR boilerplate that nearly every posting carries. Left in, they read as skills: "contact Human
+# Resources", "regardless of ... heritage", "no immigration sponsorship", "employee counseling services".
+_BOILERPLATE_RX = re.compile(
+    r"equal (employment )?opportunity|\beeo\b|affirmative action|without regard to|regardless of|"
+    r"reasonable accommodation|request an accommodation|disabilit|veteran status|protected (veteran|class|status)|"
+    r"sexual orientation|gender identity|national origin|genetic information|e-verify|"
+    r"background (check|screening)|drug (test|screen)|(immigration|visa|employment) sponsorship|"
+    r"require sponsorship|sponsor (a |an )?(visa|immigration|employment)|work authorization|authorized to work|"
+    r"benefits (include|package)|401\(?k\)?|paid time off|employee assistance|pay (range|transparency)|"
+    r"(salary|compensation|base pay) range|applicant privacy|privacy (notice|policy)|recruitment fraud|"
+    r"recruiting scams?",
+    re.I,
+)
+_SENTENCE_SPLIT_RX = re.compile(r"(?<=[.!?])\s+|\n+")
+
+
+def strip_boilerplate(text: str) -> str:
+    """Drop EEO, accommodation, visa, benefits and privacy sentences from a job description."""
+    return "\n".join(s for s in _SENTENCE_SPLIT_RX.split(text) if s and not _BOILERPLATE_RX.search(s))
+
+
+def posting_skills(description: str) -> dict[str, int]:
+    """Skills a job description asks for, ignoring its boilerplate."""
+    return extract_skills(strip_boilerplate(description)) if description else {}
+
+
 def extract_skills(text: str) -> dict[str, int]:
     """Return {canonical skill name: mention count} found in ``text`` (languages included).
 

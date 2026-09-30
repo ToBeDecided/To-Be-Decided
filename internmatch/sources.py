@@ -34,9 +34,9 @@ from .skills import (
     category_weights,
     classify,
     classify_description,
-    extract_skills,
     off_focus_description,
     off_focus_employer,
+    posting_skills,
 )
 
 log = logging.getLogger(__name__)
@@ -159,7 +159,7 @@ def make_posting(
     category, how = classify(title)
     if how == "off":
         return None
-    skills = extract_skills(description) if description else {}
+    skills = posting_skills(description)
     substantial = len(description.split()) >= 60
     field_weight = max(category_weights(skills).values()) if skills else 0.0
     if substantial and field_weight < 3 and off_focus_description(description) >= 2:
@@ -815,7 +815,7 @@ class ListingStore:
                 continue
             if p.url in cache:
                 p.description = cache[p.url]
-                p.skills = extract_skills(p.description)
+                p.skills = posting_skills(p.description)
                 filled += bool(p.description)
                 continue
             src = detail_source(p.url)
@@ -862,7 +862,7 @@ class ListingStore:
             cache[posting.url] = res
             if res:
                 posting.description = res
-                posting.skills = extract_skills(res)
+                posting.skills = posting_skills(res)
                 filled += 1
         self._write_json(self._descriptions_file, cache)
         return filled
