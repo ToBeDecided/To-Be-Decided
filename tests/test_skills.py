@@ -2,6 +2,7 @@ from internmatch.skills import (
     canonical,
     categories_for,
     classify,
+    classify_description,
     extract_languages,
     extract_skills,
     title_requirements,
@@ -55,6 +56,12 @@ def test_classify_titles():
     assert classify("27 Intern | US | ES&H Safety")[1] == "off"
     assert classify("27 Intern | US | Elec Field Eng")[1] == "off"
     assert classify("Public Safety Policy Intern")[0] == "Government & Policy"
+    # What the intern does outranks the department or product they do it for.
+    assert classify("Intern - Accounts Receivable & Collections")[0] == "Finance & Accounting"
+    assert classify("2027 Summer Intern: Human Resources - Spectrum News")[0] == "Consulting & Business"
+    assert classify("Art & Nature Category Management Project Intern (TikTok Shop)")[0] == "Consulting & Business"
+    assert classify("Museum Collections Intern")[0] == "Arts & Culture"
+    assert classify("Newsroom Intern")[0] == "Media & Writing"
 
 
 def test_tracks_expand_to_categories():
@@ -68,3 +75,14 @@ def test_title_requirements():
     assert [label for label, _ in title_requirements("Paralegal Intern")] == ["Legal"]
     assert "Investment finance" in [label for label, _ in title_requirements("Investment Banking Summer Analyst")]
     assert [label for label, _ in title_requirements("Summer Intern")] == ["General"]
+    # An accounts-receivable role doesn't ask for curatorial research because "Collections" is in the title.
+    assert [label for label, _ in title_requirements("Accounts Receivable & Collections Intern")] == ["Accounting"]
+    assert [label for label, _ in title_requirements("Human Resources Intern - Spectrum News")] == ["HR & recruiting"]
+
+
+def test_generic_skills_dont_decide_a_field():
+    generic = {"Research": 2, "Writing": 2, "Public Speaking": 1, "Microsoft Office": 1}
+    assert classify_description(generic, min_weight=4.5)[0] is not None  # white-collar, some field...
+    assert classify_description(generic, min_weight=4.5, generic_weight=0.3)[0] is None  # ...but not which one
+    teaching = {"Tutoring": 1, "Teaching": 1, "Writing": 1}
+    assert classify_description(teaching, min_weight=4.5, generic_weight=0.3)[0] == "Education & Research"

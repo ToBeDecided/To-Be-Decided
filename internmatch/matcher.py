@@ -22,6 +22,7 @@ from .companies import normalize_company, selectivity
 from .models import CategoryFit, Match, Posting, Profile, ProfileSummary, ResumeReport
 from .resume import ParsedResume, category_affinity, school_level
 from .skills import (
+    GENERIC_DISCOUNT,
     GENERIC_SKILLS,
     LANGUAGE_NAMES,
     TRACKS,
@@ -348,7 +349,7 @@ def score_posting(p: Posting, c: Candidate, now: datetime) -> Match:
     if desc_skills:
         # Specific skills (Westlaw, AP style, valuation) say far more about fit than generic ones (Word, "research").
         def weight(skill: str) -> float:
-            return 0.3 if skill in GENERIC_SKILLS else 1.0
+            return GENERIC_DISCOUNT if skill in GENERIC_SKILLS else 1.0
 
         hit = [s for s in desc_skills if s in c.skills]
         wanted = sum(weight(s) for s in desc_skills)

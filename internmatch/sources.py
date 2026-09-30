@@ -30,6 +30,7 @@ import httpx
 from . import config
 from .models import Posting
 from .skills import (
+    GENERIC_DISCOUNT,
     category_weights,
     classify,
     classify_description,
@@ -169,21 +170,22 @@ def make_posting(
         label_cat, label_how = classify(source_category)
         if label_how == "off" and how == "none":
             return None
-        # A vague title needs clearer evidence from the description than a weak one does.
-        desc_cat, _ = classify_description(skills, min_weight=3 if how == "weak" else 4.5)
+        # Generic asks (Office, research, writing, public speaking) show a posting is white-collar, not which field.
+        specific = category_weights(skills, generic_weight=GENERIC_DISCOUNT)
         if how == "weak":
             # "Operations Analyst" is a business role unless the job board's label is backed by the description.
-            if label_how == "strong" and (not substantial or category_weights(skills)[label_cat] >= 2):
+            if label_how == "strong" and (not substantial or specific[label_cat] >= 2):
                 category = label_cat
         else:
-            # The title says nothing about the field ("Summer Intern"), so let the description decide. Job boards'
-            # own labels are noisy: when a full description shows no sign of the field, don't trust the label.
+            # The title says nothing about the field ("Summer Intern"), so let the description's specific skills
+            # decide, then the job board's label. Labels are noisy: when a full description shows no sign of any of
+            # our fields, don't trust the label.
+            desc_cat, _ = classify_description(skills, min_weight=4.5, generic_weight=GENERIC_DISCOUNT)
+            in_field, _ = classify_description(skills, min_weight=4.5)
             guess = label_cat if label_how == "strong" else hint_category or default_category
-            if desc_cat:
-                guess = desc_cat
-            elif substantial and guess != default_category:
+            if not desc_cat and not in_field and substantial and guess != default_category:
                 return None
-            category = guess
+            category = desc_cat or guess or in_field
     if category is None:
         return None
     pay_kind, pay_detail = pay if pay and pay[0] != "unknown" else detect_pay(f"{title}\n{description}")

@@ -88,7 +88,7 @@ def _print_report(res: AnalysisResult, show_all: bool) -> None:
         pay = f"  [{post.pay_detail or post.pay}]" if post.pay != "unknown" else ""
         print(f"  {m.tier:<7}{m.likelihood:>5}{m.match_score:>5}  {post.company[:25]:<26}{post.title[:43]:<44}"
               f"{loc[:21]:<22}{posted}{pay}")
-        print(f"  {'':<17}{post.url}")
+        print(f"  {'':<17}{post.category} · {post.url}")
 
 
 def _write_csv(res: AnalysisResult, path: str) -> None:

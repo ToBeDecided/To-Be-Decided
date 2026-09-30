@@ -96,6 +96,19 @@ def test_weak_titles_keep_their_own_category_over_noisy_labels():
     assert "Excel" in p[0].skills  # skills are extracted once, at download time
 
 
+def test_generic_descriptions_keep_the_job_boards_label():
+    # "Research, writing, public speaking" used to read as an education role, so an English major matched a bank's
+    # leadership program. Only specific skills can override the label.
+    corp = " ".join(["Conduct research, strong writing and public speaking skills, Microsoft Office, Excel."] * 6)
+    p = parse_muse({"results": [muse_job(97, "Graduate Leadership Program - Consumer Deposit Products", "TD Bank",
+                                         "Accounting and Finance", contents=f"<p>{corp}</p>")]})
+    assert p[0].category == "Finance & Accounting"
+    tutoring = " ".join(["Tutor K-12 students and support classroom teaching; lesson planning."] * 6)
+    p = parse_muse({"results": [muse_job(98, "Summer Intern", "City Schools", "Management",
+                                         contents=f"<p>{tutoring}</p>")]})
+    assert p[0].category == "Education & Research"
+
+
 def test_detect_pay():
     assert detect_pay("Pay: $18-$22 per hour") == ("paid", "$18-$22 per hour")
     assert detect_pay("Interns earn $25 an hour") == ("paid", "$25 an hour")

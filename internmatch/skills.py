@@ -473,10 +473,13 @@ _STRONG_CATEGORY_RULES: tuple[tuple[str, str], ...] = (
      r"city council|governor|white house|campaign (intern|fellow|organizer)|field organiz", "Government & Policy"),
     (r"financ|accounting|accountant|\baudit|\btax\b|treasury|investment|banking|equity research|private equity|"
      r"wealth management|asset management|capital markets|credit|underwrit|insurance|actuar|fp&a|\bm&a\b|"
-     r"hedge fund|summer analyst|bookkeep|payroll", "Finance & Accounting"),
+     r"hedge fund|summer analyst|bookkeep|payroll|accounts? (payable|receivable)|\bbilling\b", "Finance & Accounting"),
     (r"marketing|\bbrand|advertis|communications|public relations|\bpr\b|social media|\bcontent\b|"
      r"media relations|\bevents?\b|graphic design|\bgrowth\b|e-?commerce|digital media|publicity|influencer",
      "Marketing & Communications"),
+    (r"human resources|\bhr\b|recruit(ing|er|ment)|talent acquisition|people (ops|operations)|category manag|"
+     r"merchandis|\bbuyer\b|\bsales\b|account (executive|manager|management)|supply chain|procurement",
+     "Consulting & Business"),
     (r"editorial|\beditor|journalis|reporter|newsroom|\bwriter|\bwriting|copy ?edit|proofread|fact[- ]?check|"
      r"publishing|literary|magazine|newspaper|podcast|\bradio\b|broadcast|documentary|\bnews\b|\bbooks?\b",
      "Media & Writing"),
@@ -542,9 +545,16 @@ def off_focus_employer(company: str) -> bool:
     return bool(company and _OFF_FOCUS_EMPLOYER.search(company))
 
 
-def category_weights(skills: dict[str, int] | set[str]) -> dict[str, float]:
-    """How strongly a set of skills points at each category (sum of signature weights)."""
-    return {cat: sum(w for skill, w in sig.items() if skill in skills) for cat, sig in CATEGORY_SIGNATURES.items()}
+def category_weights(skills: dict[str, int] | set[str], generic_weight: float = 1.0) -> dict[str, float]:
+    """How strongly a set of skills points at each category (sum of signature weights).
+
+    ``generic_weight`` scales skills nearly every posting mentions (Word, "research", "writing"), so that a corporate
+    description asking for research and writing isn't mistaken for an education or media role.
+    """
+    return {
+        cat: sum(w * (generic_weight if skill in GENERIC_SKILLS else 1.0) for skill, w in sig.items() if skill in skills)
+        for cat, sig in CATEGORY_SIGNATURES.items()
+    }
 
 
 # Skills nearly every posting asks for. They count for little when judging fit.
@@ -553,11 +563,14 @@ GENERIC_SKILLS = frozenset({
     "Public Speaking", "Customer Service", "Data Entry", "Administrative Support", "Project Management",
     "Data Analysis",
 })
+GENERIC_DISCOUNT = 0.3  # how much a generic skill counts relative to a specific one
 
 
-def classify_description(skills: dict[str, int] | set[str], min_weight: float = 3) -> tuple[str | None, float]:
+def classify_description(
+    skills: dict[str, int] | set[str], min_weight: float = 3, generic_weight: float = 1.0
+) -> tuple[str | None, float]:
     """Best-matching category for a job description's skills: (category or None if unclear, weight)."""
-    scores = category_weights(skills)
+    scores = category_weights(skills, generic_weight)
     best = max(scores, key=scores.get)
     return (best, scores[best]) if scores[best] >= min_weight else (None, scores[best])
 
@@ -618,7 +631,7 @@ TITLE_RULES: tuple[tuple[str, str, tuple[tuple[str, ...], ...]], ...] = (
     (r"human resources|\bhr\b|recruit|talent|people (ops|operations|team)", "HR & recruiting",
      (("Human Resources",), ("Microsoft Office", "Excel", "Google Workspace"),
       ("Communication", "Data Entry", "Administrative Support"))),
-    (r"supply chain|logistics|procurement|purchasing|merchandis|buying|retail", "Operations",
+    (r"supply chain|logistics|procurement|purchasing|merchandis|buying|retail|category manag", "Operations",
      (("Operations", "Data Analysis"), ("Excel",), ("Project Management", "Negotiation"))),
     (r"marketing|\bbrand|\bgrowth\b|advertis|digital media|e-?commerce|partnerships", "Marketing",
      (("Marketing", "Brand Marketing", "Content Creation", "Social Media"),
@@ -674,6 +687,11 @@ TITLE_RULES: tuple[tuple[str, str, tuple[tuple[str, ...], ...]], ...] = (
       ("Research", "Data Analysis"))),
 )
 
+# Rules naming what the intern does vs. rules naming the kind of organization or product they do it for.
+_FUNCTION_RULES = {"Accounting", "Finance", "HR & recruiting", "Sales", "Operations"}
+_DOMAIN_RULES = {"Editorial & journalism", "Publishing", "Media production", "Museums, archives & arts",
+                 "Performing arts", "Education", "Nonprofit"}
+
 _TITLE_RULES_COMPILED = tuple((re.compile(p, re.I), label, groups) for p, label, groups in TITLE_RULES)
 
 
@@ -684,4 +702,6 @@ def title_requirements(title: str) -> list[tuple[str, tuple[tuple[str, ...], ...
     """
     matched = [(label, groups) for rx, label, groups in _TITLE_RULES_COMPILED if rx.search(title)]
     specific = [m for m in matched if m[0] != "General"]
+    if any(label in _FUNCTION_RULES for label, _ in specific):
+        specific = [m for m in specific if m[0] not in _DOMAIN_RULES]
     return specific or matched
