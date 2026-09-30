@@ -74,8 +74,9 @@ def muse_rows() -> list[dict]:
     ]
 
 
-def muse_transport(rows: list[dict], calls: list[str] | None = None, fail: bool = False) -> httpx.MockTransport:
-    """Mimic The Muse's /jobs endpoint: filter by category, one page of results."""
+def muse_transport(rows: list[dict], calls: list[str] | None = None, fail: bool = False,
+                   per_page: int = 20) -> httpx.MockTransport:
+    """Mimic The Muse's /jobs endpoint: filter by category; pages are numbered from 0, like the real API."""
 
     def handler(request: httpx.Request) -> httpx.Response:
         if calls is not None:
@@ -86,10 +87,12 @@ def muse_transport(rows: list[dict], calls: list[str] | None = None, fail: bool 
             return httpx.Response(404, json={"error": "not found"})
         assert request.url.params.get("level") == "Internship"
         cat = request.url.params.get("category")
-        page = int(request.url.params.get("page", "1"))
+        page = int(request.url.params.get("page", "0"))
         results = [r for r in rows if cat is None or any(c["name"] == cat for c in r["categories"])]
-        return httpx.Response(200, json={"page": page, "page_count": 1, "items_per_page": 20,
-                                         "total": len(results), "results": results if page == 1 else []})
+        pages = max(1, -(-len(results) // per_page))
+        return httpx.Response(200, json={"page": page, "page_count": pages, "items_per_page": per_page,
+                                         "total": len(results),
+                                         "results": results[page * per_page:(page + 1) * per_page]})
 
     return httpx.MockTransport(handler)
 

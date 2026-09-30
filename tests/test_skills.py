@@ -49,6 +49,9 @@ def test_classify_titles():
     assert classify("Clinical Research Intern") == ("Other", "off")
     assert classify("Data Analyst Intern") == ("Consulting & Business", "weak")
     assert classify("Summer Intern") == (None, "none")
+    assert classify("Operations Analyst Intern") == ("Consulting & Business", "weak")  # "opera" is not arts
+    assert classify("Opera Production Intern")[0] == "Arts & Culture"
+    assert classify("Intern, R&D Bioresource Security") == ("Other", "off")
 
 
 def test_tracks_expand_to_categories():

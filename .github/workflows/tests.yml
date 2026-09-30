@@ -47,7 +47,11 @@ jobs:
         run: |
           .venv/bin/internmatch doctor --verbose
           curl -s http://127.0.0.1:8123/api/meta | .venv/bin/python -c "import json,sys; d=json.load(sys.stdin); print({k: (v['count'], v['error']) for k, v in d['listings']['sources'].items()})"
-          .venv/bin/internmatch analyze tests/fixtures/prelaw_resume.txt --no-enrich --top 10
+          for r in prelaw business humanities; do
+            echo "::group::$r resume vs live listings"
+            .venv/bin/internmatch analyze tests/fixtures/${r}_resume.txt --no-enrich --top 10
+            echo "::endgroup::"
+          done
       - name: Server log
         if: always()
         run: cat server.log || true

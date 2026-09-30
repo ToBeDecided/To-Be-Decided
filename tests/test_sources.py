@@ -24,7 +24,7 @@ from internmatch.sources import (
     upcoming_terms,
 )
 
-from .conftest import iso, mock_transport, muse_transport, no_keys
+from .conftest import iso, mock_transport, muse_job, muse_transport, no_keys
 
 
 def run(coro):
@@ -48,6 +48,33 @@ def test_parse_muse(rows):
     assert postings["muse:15"].category == "Media & Writing"
 
 
+def test_muse_pages_are_numbered_from_zero(tmp_path, rows):
+    calls: list[str] = []
+    s = ListingStore(cache_dir=tmp_path, settings=no_keys, transport=muse_transport(rows, calls, per_page=2))
+    postings, detail = run(s.fetch_source("themuse"))
+    assert len(postings) == 15  # nothing lost on page 0
+    legal_pages = sorted(int(httpx.URL(c).params["page"]) for c in calls
+                         if httpx.URL(c).params.get("category") == "Legal Services")
+    assert legal_pages == [0, 1, 2]  # 5 legal rows at 2 per page
+    assert detail["queries"]["Legal Services"]["kept"] == 5
+
+
+def test_titles_without_a_field_signal_use_the_description():
+    lawn = parse_muse({"results": [muse_job(90, "Residential Lawn Specialist Intern", "TruGreen", "Legal Services",
+                                            contents="<p>Sell lawn care plans door to door. Customer service.</p>")]})
+    assert lawn == []  # off-focus despite the "Legal Services" label
+    filler = " ".join(["Stock shelves, greet customers and keep the store tidy."] * 8)
+    vague = parse_muse({"results": [muse_job(91, "Summer Intern", "Acme", "Legal Services",
+                                             contents=f"<p>{filler}</p>")]})
+    assert vague == []  # label says legal, description doesn't back it up
+    backed = parse_muse({"results": [muse_job(92, "Summer Intern", "Acme", "Business Operations",
+                                              contents="<p>Legal research on Westlaw and drafting legal memos.</p>")]})
+    assert backed[0].category == "Legal"
+    lab = parse_muse({"results": [muse_job(93, "Intern, Year Round", "Sandia National Laboratories", "Management",
+                                           contents="<p>Project management and Excel.</p>")]})
+    assert lab == []
+
+
 def test_detect_pay():
     assert detect_pay("Pay: $18-$22 per hour") == ("paid", "$18-$22 per hour")
     assert detect_pay("Interns earn $25 an hour") == ("paid", "$25 an hour")
@@ -60,6 +87,7 @@ def test_detect_pay():
 def test_terms():
     assert terms_from_text("Legal Intern - Summer 2027") == ["Summer 2027"]
     assert terms_from_text("Intern", "Starts Fall '27, continues Spring 2028") == ["Fall 2027", "Spring 2028"]
+    assert terms_from_text("2027 Summer Intern: Operations Analyst") == ["Summer 2027"]
     now = datetime(2026, 9, 30, tzinfo=timezone.utc)
     assert upcoming_terms(now) == ["Spring 2027", "Summer 2027", "Fall 2027", "Spring 2028"]
 

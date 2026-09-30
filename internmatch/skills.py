@@ -466,7 +466,7 @@ _STRONG_CATEGORY_RULES: tuple[tuple[str, str], ...] = (
      r"publishing|literary|magazine|newspaper|podcast|\bradio\b|broadcast|documentary|\bnews\b|\bbooks?\b",
      "Media & Writing"),
     (r"museum|curator|curatorial|collections|archiv|gallery|exhibit|librar|historic|heritage|preservation|"
-     r"theat(er|re)|\bmusic|\bdance|opera|symphony|orchestra|\bfilm|\barts?\b|cultural", "Arts & Culture"),
+     r"theat(er|re)|\bmusic|\bdance|\bopera\b|symphony|orchestra|\bfilm|\barts?\b|cultural", "Arts & Culture"),
     (r"non-?profit|fundrais|\bgrants?\b|donor|philanthrop|advoca|outreach|social impact|volunteer|human rights|"
      r"\bjustice\b|development (intern|associate|assistant)|community (engagement|organiz)", "Nonprofit & Advocacy"),
     (r"teach|tutor|education|classroom|curriculum|\bschool|instruct|literacy|youth|camp counselor",
@@ -477,9 +477,14 @@ _OFF_FOCUS = re.compile(
     r"information technology|network|hardware|electrical|mechanical|chemical|biolog|chemist|laborator|\blab\b|"
     r"clinical|nurs|medical|pharma|physician|dental|veterinar|health ?care|scientist|geolog|physics|manufactur|"
     r"technician|mechanic|construction|welding|electrician|plumb|hvac|\bdriver|warehouse|\bcook\b|chef|culinary|"
-    r"pilot|aviation|security guard|environmental science|ecolog|wildlife|forestry|fisheries|biomedical",
+    r"pilot|aviation|security guard|environmental|ecolog|wildlife|forestry|fisheries|biomedical|\bbio|nuclear|"
+    r"\br&d\b|research and development|supplier quality|quality (engineer|assurance|control)|lawn|landscap|"
+    r"automotive|plant operations|field service|maintenance",
     re.I,
 )
+# Employers whose weakly-titled roles ("Intern, Year Round") are almost always technical.
+_OFF_FOCUS_EMPLOYER = re.compile(r"laborator|engineering|hospital|health system|medical center|pharmaceutical|"
+                                 r"semiconductor|aerospace", re.I)
 _WEAK_CATEGORY_RULES: tuple[tuple[str, str], ...] = (
     (r"research|fellow|scholar|think tank", "Education & Research"),
     (r"consult|strategy|business|operations|\bsales\b|\baccount|human resources|\bhr\b|recruit|talent|"
@@ -504,6 +509,20 @@ def classify(title: str) -> tuple[str | None, str]:
         if rx.search(title):
             return cat, "weak"
     return None, "none"
+
+
+def off_focus_employer(company: str) -> bool:
+    return bool(company and _OFF_FOCUS_EMPLOYER.search(company))
+
+
+def classify_description(text: str) -> tuple[str | None, float]:
+    """Best-matching category for a job description, by weighted signature skills (category, weight)."""
+    if not text:
+        return None, 0.0
+    found = set(extract_skills(text[:8000]))
+    scores = {cat: sum(w for skill, w in sig.items() if skill in found) for cat, sig in CATEGORY_SIGNATURES.items()}
+    best = max(scores, key=scores.get)
+    return (best, scores[best]) if scores[best] >= 3 else (None, scores[best])
 
 
 def classify_title(title: str) -> str | None:
@@ -589,7 +608,7 @@ TITLE_RULES: tuple[tuple[str, str, tuple[tuple[str, ...], ...]], ...] = (
      r"cultural|\barts?\b", "Museums, archives & arts",
      (("Art History", "Curatorial Research", "Historical Research", "Archival Research"),
       ("Collections Management", "Library", "Museum Education", "Arts Administration"), ("Research", "Writing"))),
-    (r"theat(er|re)|\bmusic|\bdance|opera|symphony|orchestra|perform", "Performing arts",
+    (r"theat(er|re)|\bmusic|\bdance|\bopera\b|symphony|orchestra|perform", "Performing arts",
      (("Performing Arts", "Arts Administration"), ("Event Planning", "Marketing", "Social Media"),
       ("Writing", "Customer Service"))),
     (r"teach|tutor|education|classroom|curriculum|\bschool|instruct|\bcamp\b|youth|literacy", "Education",

@@ -125,6 +125,14 @@ def test_stale_postings_and_deadlines(prelaw_text):
     assert any("40 days" in w for w in matches[1].warnings)
 
 
+def test_postings_for_past_terms_are_closed(prelaw_text):
+    now = datetime.now(timezone.utc)
+    last = f"Summer {now.year - 1}"
+    old = Posting(id="old", source="t", company="Co", title=f"Legal Intern ({last})", category="Legal", terms=[last])
+    matches, excluded = rank([old], candidate(prelaw_text, Profile()))
+    assert not matches and excluded["closed"] == 1
+
+
 def test_underclassmen_get_early_programs(postings, weak_text):
     prof = Profile(degree_level="bachelor", grad_year=2030)
     matches, excluded = rank(postings, candidate(weak_text, prof))

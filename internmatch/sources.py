@@ -29,12 +29,13 @@ import httpx
 
 from . import config
 from .models import Posting
-from .skills import classify
+from .skills import classify, classify_description, off_focus_employer
 
 log = logging.getLogger(__name__)
 
 USER_AGENT = "internmatch/0.2 (+https://github.com/ToBeDecided/To-Be-Decided)"
 _TERM_RX = re.compile(r"\b(summer|fall|autumn|winter|spring)\s*(?:semester\s*)?'?(20\d{2}|\d{2})\b", re.I)
+_YEAR_FIRST_TERM_RX = re.compile(r"\b(20\d{2})\s+(summer|fall|autumn|winter|spring)\b", re.I)
 _INTERN_RX = re.compile(r"\bintern(ship)?s?\b|\bco-?op\b|\bapprentice|\bextern(ship)?\b|\bstudent trainee\b|"
                         r"\bsummer (analyst|associate|fellow)|\bfellowship\b|\bstudent (assistant|aide|worker)\b",
                         re.I)
@@ -74,7 +75,8 @@ def terms_from_text(title: str, description: str = "") -> list[str]:
     """Internship terms ("Summer 2027") named in the title, else in the description."""
     for text in (title, description[:4000]):
         out: list[str] = []
-        for season, year in _TERM_RX.findall(text or ""):
+        pairs = _TERM_RX.findall(text or "") + [(season, year) for year, season in _YEAR_FIRST_TERM_RX.findall(text or "")]
+        for season, year in pairs:
             season = "Fall" if season.lower() == "autumn" else season.capitalize()
             year = year if len(year) == 4 else f"20{year}"
             term = f"{season} {year}"
@@ -150,16 +152,22 @@ def make_posting(
     if how == "off":
         return None
     if how != "strong":
-        # The source's own label ("Legal Services") beats a weak title guess like "analyst".
+        if off_focus_employer(company):
+            return None
         label_cat, label_how = classify(source_category)
         if label_how == "off" and how == "none":
             return None
-        if label_how == "strong":
-            category = label_cat
-        elif hint_category:
-            category = hint_category
-        elif category is None:
-            category = default_category
+        # The source's own label ("Legal Services") beats a weak title guess like "analyst".
+        guess = label_cat if label_how == "strong" else hint_category or category or default_category
+        if how == "none" and description:
+            # The title says nothing about the field ("Summer Intern"), so let the description decide. Job boards'
+            # own labels are noisy: when a full description shows no sign of the field, don't trust the label.
+            desc_cat, _ = classify_description(description)
+            if desc_cat:
+                guess = desc_cat
+            elif len(description.split()) >= 60 and guess != default_category:
+                return None
+        category = guess
     if category is None:
         return None
     pay_kind, pay_detail = pay if pay and pay[0] != "unknown" else detect_pay(f"{title}\n{description}")
@@ -186,32 +194,27 @@ def make_posting(
 # ---------------------------------------------------------------------------
 
 MUSE_URL = "https://www.themuse.com/api/public/jobs"
-# Muse category name -> our category (used when a job title alone is ambiguous).
+# Muse category name -> our category (used when a job title alone is ambiguous). These are the names the live
+# API recognizes; unknown names silently return nothing.
 MUSE_CATEGORIES: dict[str, str] = {
     "Legal Services": "Legal",
-    "Law": "Legal",
     "Accounting and Finance": "Finance & Accounting",
-    "Accounting": "Finance & Accounting",
-    "Finance": "Finance & Accounting",
     "Business Operations": "Consulting & Business",
     "Management": "Consulting & Business",
     "Project Management": "Consulting & Business",
     "Human Resources and Recruitment": "Consulting & Business",
     "Sales": "Consulting & Business",
+    "Account Management": "Consulting & Business",
+    "Data and Analytics": "Consulting & Business",
+    "Real Estate": "Finance & Accounting",
     "Advertising and Marketing": "Marketing & Communications",
-    "Marketing": "Marketing & Communications",
     "Media, PR, and Communications": "Marketing & Communications",
-    "Public Relations": "Marketing & Communications",
-    "Social Media": "Marketing & Communications",
+    "Social Media and Community": "Marketing & Communications",
     "Writing and Editing": "Media & Writing",
-    "Editor": "Media & Writing",
-    "Writer": "Media & Writing",
     "Arts": "Arts & Culture",
     "Education": "Education & Research",
-    "Social Services": "Nonprofit & Advocacy",
-    "Nonprofit": "Nonprofit & Advocacy",
 }
-MUSE_PAGES_PER_CATEGORY = 3
+MUSE_PAGES_PER_CATEGORY = 10  # 20 results a page
 MUSE_GENERAL_PAGES = 5
 
 
@@ -248,8 +251,8 @@ async def fetch_muse(client: httpx.AsyncClient, settings: Callable[[str], str | 
 
     async def query(category: str | None, max_pages: int) -> list[Posting]:
         found: list[Posting] = []
-        page, page_count, total = 1, 1, None
-        while page <= min(page_count, max_pages):
+        page, page_count, total = 0, 1, None  # The Muse numbers pages from 0
+        while page < min(page_count, max_pages):
             params = base + [("page", page)] + ([("category", category)] if category else [])
             async with sem:
                 resp = await client.get(MUSE_URL, params=params)
@@ -855,7 +858,7 @@ def _term_key(term: str) -> tuple[int, int]:
     return (int(year) if year.isdigit() else 0, _SEASON_ORDER.get(season, 9))
 
 
-def _started(term: str, now: datetime) -> bool:
+def term_started(term: str, now: datetime) -> bool:
     year, season = _term_key(term)
     if not year or year < now.year:
         return True
@@ -867,7 +870,7 @@ def _started(term: str, now: datetime) -> bool:
 def upcoming_terms(now: datetime, n: int = 4) -> list[str]:
     """The next few internship terms that haven't started yet, in order."""
     terms = [f"{season} {y}" for y in (now.year, now.year + 1, now.year + 2) for season in ("Spring", "Summer", "Fall")]
-    return [t for t in terms if not _started(t, now)][:n]
+    return [t for t in terms if not term_started(t, now)][:n]
 
 
 def term_options(postings: Iterable[Posting], now: datetime | None = None) -> list[dict[str, Any]]:
@@ -876,7 +879,7 @@ def term_options(postings: Iterable[Posting], now: datetime | None = None) -> li
     counts: dict[str, int] = {t: 0 for t in upcoming_terms(now)}
     for p in postings:
         for t in p.terms:
-            if not _started(t, now):
+            if not term_started(t, now):
                 counts[t] = counts.get(t, 0) + 1
     return sorted(({"term": t, "count": n} for t, n in counts.items()), key=lambda d: _term_key(d["term"]))
 

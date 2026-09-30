@@ -22,6 +22,7 @@ from .companies import normalize_company, selectivity
 from .models import CategoryFit, Match, Posting, Profile, ProfileSummary, ResumeReport
 from .resume import ParsedResume, category_affinity, school_level
 from .skills import LANGUAGE_NAMES, TRACKS, canonical, categories_for, extract_skills, title_requirements
+from .sources import term_started
 
 US_STATES = {
     "alabama": "al", "alaska": "ak", "arizona": "az", "arkansas": "ar", "california": "ca", "colorado": "co",
@@ -174,10 +175,10 @@ def location_match(p: Posting, terms: list[str]) -> bool:
 def _recency(age: float | None) -> float:
     if age is None:
         return 0.5
-    for days, val in ((3, 1.0), (7, 0.9), (14, 0.75), (30, 0.55), (60, 0.35)):
+    for days, val in ((3, 1.0), (7, 0.9), (14, 0.75), (30, 0.55), (60, 0.35), (120, 0.15)):
         if age <= days:
             return val
-    return 0.2
+    return 0.0
 
 
 def _sigmoid(x: float) -> float:
@@ -207,6 +208,8 @@ def hard_block(p: Posting, c: Candidate, now: datetime) -> str | None:
         return "closed"
     if p.deadline and p.deadline < now:
         return "closed"
+    if p.terms and all(term_started(t, now) for t in p.terms):
+        return "closed"  # e.g. a "Summer 2026" posting still listed in the fall of 2026
     auth = c.profile.work_authorization
     spons = effective_sponsorship(p)
     if auth == "needs_sponsorship" and spons in {"no_sponsorship", "citizenship_required"}:
@@ -353,7 +356,7 @@ def score_posting(p: Posting, c: Candidate, now: datetime) -> Match:
         year_mult = 1.12 if early else 0.85
     elif c.level == "Sophomore":
         year_mult = 1.08 if early else 0.93
-    likelihood = 100 * (fit * loc_mult) ** 0.8 * comp * (0.8 + 0.2 * rec) * year_mult
+    likelihood = 100 * (fit * loc_mult) ** 0.8 * comp * (0.65 + 0.35 * rec) * year_mult
     likelihood = max(1, min(99, round(likelihood)))
     tier = "Likely" if likelihood >= LIKELY_AT else "Target" if likelihood >= TARGET_AT else "Reach"
 
@@ -364,6 +367,8 @@ def score_posting(p: Posting, c: Candidate, now: datetime) -> Match:
     if age is not None and age <= 7:
         reasons.append(f"Posted {'today' if age < 1 else f'{int(age)} day(s) ago'}. Early applicants get the most "
                        "interviews.")
+    elif age is not None and age > 120:
+        warnings.append(f"Posted {int(age)} days ago. It has probably been filled; check before applying.")
     elif age is not None and age > 30:
         warnings.append(f"Posted {int(age)} days ago. It may be close to filled.")
     if p.deadline:
