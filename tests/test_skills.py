@@ -25,6 +25,10 @@ def test_common_false_positives_are_ignored():
     text = "I excel at teamwork. April events in Spring 2025. John R. Smith; R&D lab; Latin honors; Greek life."
     found = extract_skills(text)
     assert not {"Excel", "Public Relations", "R", "Latin", "Greek", "Event Planning"} & set(found)
+    # Corporate boilerplate that used to read as teaching or immigration law.
+    boilerplate = ("You will learn through classroom training, coaching and mentoring as part of our training "
+                   "curriculum. Applicants must not require immigration sponsorship now or in the future.")
+    assert extract_skills(boilerplate) == {}
 
 
 def test_languages_need_language_context():
