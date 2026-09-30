@@ -62,6 +62,8 @@ def test_classify_titles():
     assert classify("Art & Nature Category Management Project Intern (TikTok Shop)")[0] == "Consulting & Business"
     assert classify("Museum Collections Intern")[0] == "Arts & Culture"
     assert classify("Newsroom Intern")[0] == "Media & Writing"
+    assert classify("Intern, Product Analytics Leadership Development Program") == ("Consulting & Business", "weak")
+    assert classify("GE Vernova - Aeroderivative Industrialization Internship")[1] == "off"
 
 
 def test_tracks_expand_to_categories():

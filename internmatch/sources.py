@@ -174,7 +174,7 @@ def make_posting(
         specific = category_weights(skills, generic_weight=GENERIC_DISCOUNT)
         if how == "weak":
             # "Operations Analyst" is a business role unless the job board's label is backed by the description.
-            if label_how == "strong" and (not substantial or specific[label_cat] >= 2):
+            if label_how == "strong" and (not substantial or specific[label_cat] >= 3):
                 category = label_cat
         else:
             # The title says nothing about the field ("Summer Intern"), so let the description's specific skills

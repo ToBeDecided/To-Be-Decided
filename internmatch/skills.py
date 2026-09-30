@@ -499,7 +499,7 @@ _OFF_FOCUS = re.compile(
     r"\br&d\b|research and development|supplier quality|quality (engineer|assurance|control)|lawn|landscap|"
     r"automotive|plant operations|field service|maintenance|patholog|anatom|histolog|specimen|diagnostic|"
     r"hygien|\benv\b|\bconst\b|\bpvd\b|chips?\b|voltage|firmware|robotic|\bsafety\b|\bes&h\b|\behs\b|"
-    r"\belec\b|\beng\b",
+    r"\belec\b|\beng\b|\baero|industrializ|turbine|propulsion",
     re.I,
 )
 # Phrases in a job description that mark a technical, scientific or medical role.
@@ -519,7 +519,7 @@ _WEAK_CATEGORY_RULES: tuple[tuple[str, str], ...] = (
     (r"research|fellow|scholar|think tank", "Education & Research"),
     (r"consult|strategy|business|operations|\bsales\b|\baccount|human resources|\bhr\b|recruit|talent|"
      r"supply chain|logistics|procurement|real estate|entrepreneur|project manag|management|analyst|admin|"
-     r"\boffice\b|coordinator|customer success|partnerships|retail|merchandis|buying|venture",
+     r"\boffice\b|coordinator|customer success|partnerships|retail|merchandis|buying|venture|analytics",
      "Consulting & Business"),
 )
 _STRONG_COMPILED = tuple((re.compile(p, re.I), c) for p, c in _STRONG_CATEGORY_RULES)

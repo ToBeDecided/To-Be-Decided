@@ -94,6 +94,10 @@ def test_weak_titles_keep_their_own_category_over_noisy_labels():
                                          "Legal Services", contents=f"<p>{ops}</p>")]})
     assert p[0].category == "Consulting & Business"  # not "Legal", despite the label
     assert "Excel" in p[0].skills  # skills are extracted once, at download time
+    security = " ".join(["Track security incidents in our case management system and support compliance."] * 6)
+    p = parse_muse({"results": [muse_job(99, "Operations Analyst - Corporate Physical Security", "Spectrum",
+                                         "Legal Services", contents=f"<p>{security}</p>")]})
+    assert p[0].category == "Consulting & Business"  # a passing mention of compliance isn't a legal role
 
 
 def test_generic_descriptions_keep_the_job_boards_label():
