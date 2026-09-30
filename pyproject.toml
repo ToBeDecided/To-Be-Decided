@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "internmatch"
-version = "0.1.0"
-description = "Rate your resume and find the internships you're most likely to get interviews for."
+version = "0.2.0"
+description = "Rate your resume and find pre-law, business and humanities internships you are likely to get interviews for."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.110",
-    "uvicorn[standard]>=0.27",
+    "uvicorn>=0.27",
     "httpx>=0.27",
     "pydantic>=2.6",
     "pypdf>=4.0",

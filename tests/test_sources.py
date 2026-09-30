@@ -3,173 +3,234 @@ import json
 from datetime import datetime, timezone
 
 import httpx
+import pytest
 
 from internmatch.sources import (
+    ADZUNA_URL,
+    USAJOBS_URL,
     ListingStore,
     default_terms,
     detail_source,
+    detect_pay,
     html_to_text,
-    parse_ashby_board,
+    parse_adzuna,
     parse_board_spec,
     parse_greenhouse_board,
     parse_lever_board,
-    parse_simplify,
-    simplify_urls,
+    parse_muse,
+    parse_usajobs,
     term_options,
-    terms_from_title,
+    terms_from_text,
+    upcoming_terms,
 )
 
-from .conftest import mock_transport, row
+from .conftest import iso, mock_transport, muse_transport, no_keys
 
 
 def run(coro):
     return asyncio.run(coro)
 
 
-def test_parse_simplify_normalizes_fields(rows):
-    rows.append(row(99, "Hidden Co", "Intern", sponsorship="Offers Sponsorship"))
-    rows[-1]["is_visible"] = False
-    postings = parse_simplify(rows)
-    assert len(postings) == len(rows) - 2  # one inactive, one hidden
-    by_id = {p.id: p for p in postings}
-    contoso = by_id["simplify:id-6"]
-    assert contoso.sponsorship == "citizenship_required"
-    assert by_id["simplify:id-7"].degrees == ["phd"]
-    assert by_id["simplify:id-3"].category == "AI/ML/Data"
-    assert by_id["simplify:id-1"].date_posted.tzinfo is not None
+def test_parse_muse(rows):
+    postings = {p.id: p for p in parse_muse({"results": rows})}
+    assert "muse:11" not in postings  # software engineering: off-focus
+    legal = postings["muse:1"]
+    assert legal.source == "The Muse" and legal.category == "Legal"
+    assert legal.company == "Hartley Legal Aid" and legal.locations == ["Boston, MA"]
+    assert legal.url.startswith("https://www.themuse.com/jobs/")
+    assert legal.terms == ["Summer 2027"] and "Westlaw" in legal.description
+    assert legal.pay == "paid" and legal.pay_detail == "$18 per hour"
+    assert legal.date_posted.tzinfo is not None
+    assert postings["muse:4"].category == "Government & Policy"
+    assert postings["muse:9"].pay == "stipend"
+    assert postings["muse:8"].pay == "unpaid"
+    # A generic "Summer Intern" title falls back to The Muse's own category.
+    assert postings["muse:15"].category == "Media & Writing"
 
 
-def test_terms_and_urls():
-    assert terms_from_title("SWE Intern - Summer 2027") == ["Summer 2027"]
-    assert terms_from_title("Co-op (Fall '26)") == ["Fall 2026"]
-    urls = simplify_urls(datetime(2026, 9, 30, tzinfo=timezone.utc))
-    assert "Summer2027" in urls[0] and "Summer2026" in urls[1]
-    assert "Summer2026" in simplify_urls(datetime(2026, 3, 1, tzinfo=timezone.utc))[0]
+def test_detect_pay():
+    assert detect_pay("Pay: $18-$22 per hour") == ("paid", "$18-$22 per hour")
+    assert detect_pay("Interns earn $25 an hour") == ("paid", "$25 an hour")
+    assert detect_pay("Unpaid; for academic credit only")[0] == "unpaid"
+    assert detect_pay("A $3,000 stipend") == ("stipend", "Stipend")
+    assert detect_pay("Competitive compensation") == ("paid", "Paid")
+    assert detect_pay("Great team") == ("unknown", "")
+
+
+def test_terms():
+    assert terms_from_text("Legal Intern - Summer 2027") == ["Summer 2027"]
+    assert terms_from_text("Intern", "Starts Fall '27, continues Spring 2028") == ["Fall 2027", "Spring 2028"]
+    now = datetime(2026, 9, 30, tzinfo=timezone.utc)
+    assert upcoming_terms(now) == ["Spring 2027", "Summer 2027", "Fall 2027", "Spring 2028"]
 
 
 def test_term_options(postings):
     now = datetime(2026, 9, 30, tzinfo=timezone.utc)
-    opts = term_options(postings, now)
-    assert [o["term"] for o in opts] == ["Summer 2027"]  # Summer 2026 has already happened
-    assert default_terms(opts, now) == ["Summer 2027"]
-    assert default_terms([], now) == []
+    opts = {o["term"]: o["count"] for o in term_options(postings, now)}
+    assert opts["Summer 2027"] >= 3 and "Spring 2027" in opts
+    assert default_terms(term_options(postings, now), now) == ["Summer 2027"]
 
 
-def test_board_spec_parsing():
-    assert parse_board_spec("greenhouse:stripe") == ("greenhouse", "stripe")
-    assert parse_board_spec("Lever: palantir") == ("lever", "palantir")
-    assert parse_board_spec("https://boards.greenhouse.io/figma") == ("greenhouse", "figma")
-    assert parse_board_spec("https://jobs.lever.co/netflix") == ("lever", "netflix")
-    assert parse_board_spec("https://jobs.ashbyhq.com/ramp") == ("ashby", "ramp")
-    assert parse_board_spec("workday:acme") is None
-    assert parse_board_spec("") is None
+USAJOBS_PAYLOAD = {"SearchResult": {"SearchResultCount": 3, "SearchResultItems": [
+    {"MatchedObjectId": "1", "MatchedObjectDescriptor": {
+        "PositionID": "DOJ-27-001", "PositionTitle": "Student Trainee (Legal Assistant)",
+        "PositionURI": "https://www.usajobs.gov/job/1", "ApplyURI": ["https://www.usajobs.gov/job/1/apply"],
+        "PositionLocation": [{"LocationName": "Washington, District of Columbia"}],
+        "OrganizationName": "Office of the U.S. Attorney", "DepartmentName": "Department of Justice",
+        "JobCategory": [{"Name": "Legal Assistance", "Code": "0986"}],
+        "PositionRemuneration": [{"MinimumRange": "18.50", "MaximumRange": "24.00", "RateIntervalCode": "PH",
+                                  "Description": "Per Hour"}],
+        "PublicationStartDate": "2026-09-20T00:00:00.0000000", "ApplicationCloseDate": "2026-10-20T23:59:59.9970000",
+        "QualificationSummary": "Must be enrolled at least half-time.",
+        "UserArea": {"Details": {"JobSummary": "Support attorneys with legal research and case files.",
+                                 "MajorDuties": ["Maintain case files", "Draft correspondence"]}}}},
+    {"MatchedObjectId": "2", "MatchedObjectDescriptor": {
+        "PositionID": "SI-27-002", "PositionTitle": "Student Trainee (Museum Specialist)",
+        "PositionURI": "https://www.usajobs.gov/job/2", "PositionLocationDisplay": "Washington, District of Columbia",
+        "OrganizationName": "Smithsonian Institution", "JobCategory": [{"Name": "Museum Specialist And Technician"}],
+        "PositionRemuneration": [{"MinimumRange": "0", "MaximumRange": "0", "RateIntervalCode": "WC"}],
+        "PublicationStartDate": "2026-09-25T00:00:00.0000000"}},
+    {"MatchedObjectId": "3", "MatchedObjectDescriptor": {
+        "PositionID": "NIH-27-003", "PositionTitle": "Student Trainee (Biological Science)",
+        "PositionURI": "https://www.usajobs.gov/job/3", "OrganizationName": "National Institutes of Health",
+        "JobCategory": [{"Name": "General Natural Resources Management And Biological Sciences"}]}},
+]}}
 
 
-def test_detail_source():
-    assert detail_source("https://job-boards.greenhouse.io/togetherai/jobs/5232036007") == (
-        "greenhouse", "togetherai", "5232036007")
-    assert detail_source("https://jobs.lever.co/acme/0b1c2d3e-1111-2222-3333-444455556666/apply")[0] == "lever"
-    assert detail_source("https://jobs.ashbyhq.com/flint/39f9e665-7037-4dff-b77a-ff7039df2bfc/application")[:2] == (
-        "ashby", "flint")
-    assert detail_source("https://acme.wd1.myworkdayjobs.com/job/123") is None
+def test_parse_usajobs():
+    postings = {p.id: p for p in parse_usajobs(USAJOBS_PAYLOAD)}
+    assert set(postings) == {"usajobs:DOJ-27-001", "usajobs:SI-27-002"}  # biology trainee is off-focus
+    doj = postings["usajobs:DOJ-27-001"]
+    assert doj.category == "Legal" and doj.company == "Office of the U.S. Attorney"
+    assert doj.pay == "paid" and doj.pay_detail == "$18.50–$24.00 per hour"
+    assert doj.deadline.month == 10 and "legal research" in doj.description
+    assert doj.locations == ["Washington, District of Columbia"]
+    museum = postings["usajobs:SI-27-002"]
+    assert museum.category == "Arts & Culture" and museum.pay == "unpaid"
 
 
-def test_html_to_text():
-    raw = "&lt;p&gt;We use &lt;strong&gt;Python&lt;/strong&gt;&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Go&lt;/li&gt;&lt;/ul&gt;"
-    text = html_to_text(raw)
-    assert "We use Python" in text and "- Go" in text and "<" not in text
+def test_fetch_usajobs_sends_key_headers(tmp_path):
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=USAJOBS_PAYLOAD)
+
+    settings = {"usajobs_api_key": "KEY", "usajobs_email": "me@example.edu"}.get
+    s = ListingStore(cache_dir=tmp_path, transport=httpx.MockTransport(handler), settings=settings)
+    postings, _ = run(s.fetch_source("usajobs"))
+    assert len(postings) == 2
+    assert seen[0].url.copy_with(query=None) == httpx.URL(USAJOBS_URL)
+    assert seen[0].headers["Authorization-Key"] == "KEY" and seen[0].headers["User-Agent"] == "me@example.edu"
+    assert seen[0].url.params["HiringPath"] == "student"
 
 
-GREENHOUSE = {"jobs": [
-    {"id": 1, "title": "Software Engineering Intern (Summer 2027)", "absolute_url": "https://gh/1",
-     "location": {"name": "New York, NY"}, "first_published": "2026-09-28T12:00:00Z",
-     "content": "&lt;p&gt;Experience with Python and React&lt;/p&gt;", "company_name": "Stripe"},
-    {"id": 2, "title": "Senior Software Engineer", "absolute_url": "https://gh/2", "location": {"name": "Remote"},
-     "content": ""},
+ADZUNA_PAYLOAD = {"count": 3, "results": [
+    {"id": "a1", "title": "Legal <strong>Intern</strong>", "description": "Assist with legal research...",
+     "redirect_url": "https://www.adzuna.com/land/ad/a1", "created": iso(2),
+     "company": {"display_name": "Morgan & Pike LLP"}, "location": {"display_name": "Chicago, Cook County"},
+     "category": {"tag": "legal-jobs", "label": "Legal Jobs"}, "salary_min": 20, "salary_max": 22,
+     "salary_is_predicted": "0"},
+    {"id": "a2", "title": "Paralegal", "description": "Full-time paralegal.", "redirect_url": "x",
+     "company": {"display_name": "X"}, "category": {"tag": "legal-jobs"}},
+    {"id": "a3", "title": "Summer Intern", "description": "Help our team.", "redirect_url": "y", "created": iso(1),
+     "company": {"display_name": "Bright Nonprofit"}, "category": {"tag": "charity-voluntary-jobs",
+                                                                    "label": "Charity & Voluntary Jobs"}},
 ]}
-LEVER = [
-    {"id": "a", "text": "Machine Learning Intern", "hostedUrl": "https://lever/a", "createdAt": 1790000000000,
-     "categories": {"location": "San Francisco, CA", "commitment": "Internship"},
-     "descriptionPlain": "Work with PyTorch.", "lists": [{"text": "Requirements", "content": "<li>SQL</li>"}]},
-    {"id": "b", "text": "Account Executive", "hostedUrl": "https://lever/b", "categories": {"commitment": "Full-time"}},
-]
-ASHBY = {"jobs": [
-    {"id": "x", "title": "Product Design Intern", "location": "Remote", "isRemote": True, "jobUrl": "https://ashby/x",
-     "publishedAt": "2026-09-20T00:00:00Z", "employmentType": "Intern", "descriptionPlain": "Figma daily."},
-    {"id": "y", "title": "Engineer", "employmentType": "FullTime", "jobUrl": "https://ashby/y"},
-]}
 
 
-def test_board_parsers():
-    gh = parse_greenhouse_board("stripe", GREENHOUSE)
-    assert len(gh) == 1 and gh[0].terms == ["Summer 2027"] and "Python" in gh[0].description
-    assert gh[0].company == "Stripe" and gh[0].category == "Software"
-    lv = parse_lever_board("acme", LEVER)
-    assert len(lv) == 1 and lv[0].category == "AI/ML/Data" and "SQL" in lv[0].description
-    assert lv[0].date_posted.year == 2026
-    ab = parse_ashby_board("ramp", ASHBY)
-    assert len(ab) == 1 and ab[0].category == "Product" and "Remote" in ab[0].locations
+def test_parse_adzuna():
+    postings = {p.id: p for p in parse_adzuna(ADZUNA_PAYLOAD)}
+    assert set(postings) == {"adzuna:a1", "adzuna:a3"}  # a full-time paralegal job isn't an internship
+    assert postings["adzuna:a1"].title == "Legal Intern" and postings["adzuna:a1"].pay_detail == "$20–$22 per hour"
+    assert postings["adzuna:a3"].category == "Nonprofit & Advocacy"
 
 
-def test_store_downloads_and_caches(store, tmp_path):
+def test_fetch_adzuna(tmp_path):
+    calls: list[str] = []
+    settings = {"adzuna_app_id": "id", "adzuna_app_key": "key"}.get
+    s = ListingStore(cache_dir=tmp_path, settings=settings,
+                     transport=mock_transport({ADZUNA_URL.format(page=1) + "*": ADZUNA_PAYLOAD}, calls))
+    postings, detail = run(s.fetch_source("adzuna"))
+    assert {p.id for p in postings} == {"adzuna:a1", "adzuna:a3"}
+    assert all("app_id=id" in c and "what=intern" in c for c in calls)
+    assert "legal-jobs" in detail["queries"]
+
+
+def test_sources_enabled_by_keys(tmp_path):
+    s = ListingStore(cache_dir=tmp_path, settings=no_keys)
+    assert s.enabled("themuse") and not s.enabled("usajobs") and not s.enabled("adzuna")
+    s2 = ListingStore(cache_dir=tmp_path, settings={"usajobs_api_key": "k", "usajobs_email": "e"}.get)
+    assert s2.enabled("usajobs")
+
+
+def test_store_downloads_and_caches(store, tmp_path, rows):
     postings = run(store.get_postings())
-    assert len(postings) == 15
-    assert (tmp_path / "simplify_postings.json").exists()
-    assert store.status()["count"] == 15
-
+    assert len(postings) == 15  # 16 rows minus the software job; the duplicate is removed later, when ranking
+    status = store.status()
+    assert status["count"] == 15 and status["sources"]["themuse"]["count"] == 15
+    assert not status["sources"]["usajobs"]["enabled"]
     # A new store reads the on-disk cache without touching the network.
-    offline = ListingStore(cache_dir=tmp_path, transport=mock_transport({}))
+    offline = ListingStore(cache_dir=tmp_path / "store", transport=muse_transport(rows, fail=True), settings=no_keys)
     assert len(run(offline.get_postings())) == 15
 
 
-def test_store_falls_back_to_stale_cache(store, tmp_path):
+def test_store_falls_back_to_stale_cache(store, tmp_path, rows):
     run(store.get_postings())
-    payload = json.loads((tmp_path / "simplify_postings.json").read_text())
+    path = tmp_path / "store" / "source_themuse.json"
+    payload = json.loads(path.read_text())
     payload["fetched_at"] = 0  # make it stale
-    (tmp_path / "simplify_postings.json").write_text(json.dumps(payload))
-    broken = ListingStore(cache_dir=tmp_path, transport=mock_transport(
-        {"https://listings.test/listings.json": httpx.Response(500)}))
+    path.write_text(json.dumps(payload))
+    broken = ListingStore(cache_dir=tmp_path / "store", transport=muse_transport(rows, fail=True), settings=no_keys)
     assert len(run(broken.get_postings())) == 15
-    assert broken.status()["error"]
+    assert "Using saved results" in broken.status()["sources"]["themuse"]["error"]
 
 
-def test_store_raises_without_any_data(tmp_path, monkeypatch):
-    monkeypatch.setenv("INTERNMATCH_LISTINGS_URL", "https://listings.test/listings.json")
-    s = ListingStore(cache_dir=tmp_path, transport=mock_transport({}))
-    try:
+def test_store_raises_without_any_data(tmp_path, rows):
+    s = ListingStore(cache_dir=tmp_path, transport=muse_transport(rows, fail=True), settings=no_keys)
+    with pytest.raises(RuntimeError, match="Could not load any internship listings"):
         run(s.get_postings())
-    except RuntimeError as exc:
-        assert "Could not download" in str(exc)
-    else:
-        raise AssertionError("expected RuntimeError")
 
 
-def test_fetch_boards(tmp_path):
-    s = ListingStore(cache_dir=tmp_path, transport=mock_transport({
-        "https://boards-api.greenhouse.io/v1/boards/stripe/jobs?content=true": GREENHOUSE,
-        "https://api.lever.co/v0/postings/acme?mode=json": LEVER,
-    }))
-    postings, errors = run(s.fetch_boards(["greenhouse:stripe", "lever:acme", "ashby:nope", "bogus"]))
-    assert {p.source for p in postings} == {"Greenhouse", "Lever"}
-    assert any("ashby:nope" in e for e in errors) and any("bogus" in e for e in errors)
+def test_board_spec_and_detail_source():
+    assert parse_board_spec("greenhouse:nytimes") == ("greenhouse", "nytimes")
+    assert parse_board_spec("https://jobs.lever.co/acme") == ("lever", "acme")
+    assert parse_board_spec("workday:acme") is None
+    assert detail_source("https://job-boards.greenhouse.io/nytimes/jobs/123") == ("greenhouse", "nytimes", "123")
+    assert detail_source("https://www.themuse.com/jobs/x/1") is None
+
+
+def test_board_parsers_keep_only_relevant_internships():
+    gh = parse_greenhouse_board("nytimes", {"jobs": [
+        {"id": 1, "title": "Editorial Intern", "absolute_url": "https://gh/1", "location": {"name": "New York, NY"},
+         "content": "&lt;p&gt;Copyediting and AP style&lt;/p&gt;", "company_name": "The New York Times"},
+        {"id": 2, "title": "Software Engineering Intern", "absolute_url": "https://gh/2", "content": ""},
+        {"id": 3, "title": "Senior Editor", "absolute_url": "https://gh/3", "content": ""},
+    ]})
+    assert [p.title for p in gh] == ["Editorial Intern"]
+    assert gh[0].category == "Media & Writing" and "AP style" in gh[0].description
+    lv = parse_lever_board("acme", [
+        {"id": "a", "text": "Summer Intern", "hostedUrl": "https://lever/a", "createdAt": 1790000000000,
+         "categories": {"location": "Chicago, IL", "commitment": "Internship", "team": "Marketing"},
+         "descriptionPlain": "Social media and events."},
+    ])
+    assert lv[0].category == "Marketing & Communications"
+
+
+def test_html_to_text():
+    raw = "&lt;p&gt;We use &lt;strong&gt;Westlaw&lt;/strong&gt;&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Research&lt;/li&gt;&lt;/ul&gt;"
+    text = html_to_text(raw)
+    assert "We use Westlaw" in text and "- Research" in text and "<" not in text
 
 
 def test_enrich_fetches_and_caches_descriptions(tmp_path, postings):
     gh_url = "https://job-boards.greenhouse.io/acme/jobs/123"
-    ashby_url = "https://jobs.ashbyhq.com/flint/39f9e665-7037-4dff-b77a-ff7039df2bfc/application"
-    postings[0].url, postings[1].url = gh_url, ashby_url
+    target = postings[0].model_copy(update={"url": gh_url, "description": ""})
     calls: list[str] = []
-    s = ListingStore(cache_dir=tmp_path, transport=mock_transport({
-        "https://boards-api.greenhouse.io/v1/boards/acme/jobs/123": {"content": "&lt;p&gt;Go and Kafka&lt;/p&gt;"},
-        "https://api.ashbyhq.com/posting-api/job-board/flint*": {"jobs": [
-            {"id": "39f9e665-7037-4dff-b77a-ff7039df2bfc", "descriptionPlain": "TypeScript and React"}]},
+    s = ListingStore(cache_dir=tmp_path, settings=no_keys, transport=mock_transport({
+        "https://boards-api.greenhouse.io/v1/boards/acme/jobs/123": {"content": "&lt;p&gt;Westlaw research&lt;/p&gt;"},
     }, calls))
-    assert run(s.enrich(postings[:3])) == 2
-    assert "Kafka" in postings[0].description and "React" in postings[1].description
-    assert len(calls) == 2  # the third posting has no supported ATS URL
-
-    # Second time round the descriptions come from the on-disk cache.
-    fresh = [p.model_copy(update={"description": ""}) for p in postings[:2]]
-    s2 = ListingStore(cache_dir=tmp_path, transport=mock_transport({}, calls))
-    assert run(s2.enrich(fresh)) == 2
-    assert len(calls) == 2
+    assert run(s.enrich([target])) == 1 and "Westlaw" in target.description
+    again = target.model_copy(update={"description": ""})
+    s2 = ListingStore(cache_dir=tmp_path, settings=no_keys, transport=mock_transport({}, calls))
+    assert run(s2.enrich([again])) == 1 and len(calls) == 1  # served from the on-disk cache

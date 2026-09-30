@@ -1,60 +1,54 @@
-# Internship Matcher
+# Internship Matcher: Pre-Law · Business · Humanities
 
 Upload your resume and get three things back:
 
-1. **A resume score** (0–100, with a letter grade) from a transparent rubric, plus a prioritized list of specific fixes and the bullets worth rewriting.
-2. **A profile rating**: how competitive you are, what level recruiters will read you as, and which role types (Software, AI/ML/Data, Hardware, Quant, Product) your resume fits best.
-3. **A shortlist of internships you're likely to get interviews for**, pulled from thousands of live postings. Each role is rated **Likely**, **Target** or **Reach**, with an explanation and an apply link.
+1. **A resume score** (0–100 with a letter grade) from a transparent rubric built for pre-law, business and humanities students, plus a prioritized list of specific fixes and the bullets worth rewriting.
+2. **A profile rating**: how competitive you are, what year recruiters will read you as, and which track (Pre-Law, Business, Humanities) and areas your resume fits best.
+3. **A shortlist of internships you're likely to get interviews for**, pulled from live postings in law and government, finance and consulting, marketing and communications, media and publishing, museums and the arts, education and nonprofits. Each role is rated **Likely**, **Target** or **Reach**, with the reasons, pay, deadline and an apply link.
 
-An optional **AI review** (Claude) adds a recruiter-style critique, line-by-line bullet rewrites and a second opinion on your top matches.
+Found a posting somewhere else (Handshake, LinkedIn, a law firm's site)? **Check a posting** scores any listing you paste in. An optional **AI review** (Claude) adds a recruiter-style critique and bullet rewrites.
 
-![Recommended internships](docs/screenshot-matches.png)
+![Recommended internships (demo data)](docs/screenshot-matches.png)
 
-## Quick start
+## Run it on a Mac
 
-Requires Python 3.10+.
+1. Download this repository: **Code › Download ZIP** on GitHub, then double-click the ZIP to unzip it. Or clone it with `git clone https://github.com/ToBeDecided/To-Be-Decided.git`.
+2. Open the folder and **double-click `start.command`**.
+   - If macOS says it "cannot be opened because it is from an unidentified developer", **right-click `start.command` › Open › Open**. You only need to do this once.
+3. A Terminal window opens. The first run takes a minute or two to set things up; after that it starts in seconds. Your browser opens to the app automatically.
+4. Keep the Terminal window open while you use the app. Close it (or press Ctrl+C) to stop.
+
+You don't need to install Python yourself. macOS comes with Python 3.9, which is too old, so if you don't already have Python 3.10 or newer, the launcher offers to install [uv](https://docs.astral.sh/uv/), a small tool that downloads a private copy of Python for this app. It goes in your home folder and doesn't need an admin password.
+
+Something not working? Run this in Terminal from the app's folder and share the output:
 
 ```bash
-git clone https://github.com/ToBeDecided/To-Be-Decided.git
-cd To-Be-Decided
+./start.command --check
+```
+
+### Other ways to run it (macOS, Linux, Windows)
+
+With Python 3.10+ installed:
+
+```bash
 python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -e .
 internmatch serve                  # opens http://127.0.0.1:8000
 ```
 
-Drop in your resume (PDF, DOCX or TXT), set your graduation year, term and preferred locations, and click **Rate my resume & find internships**.
+## Get more internships: free API keys
 
-### Command line
+The app works out of the box with **The Muse**. Two free keys add many more listings. Paste them into **Sources & keys** in the app; they're stored only on your computer.
 
-The same engine works in the terminal:
-
-```bash
-internmatch analyze resume.pdf --term "Summer 2027" --location NYC --location "Bay Area" --top 25
-internmatch analyze resume.pdf --work-auth needs_sponsorship --category Software --csv matches.csv
-internmatch analyze resume.pdf --board greenhouse:stripe --board lever:palantir   # add company boards
-internmatch analyze resume.pdf --ai                                               # add the Claude review
-internmatch refresh                                                               # re-download listings now
-```
-
-Run `internmatch analyze --help` for every option.
-
-### Optional: AI review with Claude
-
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...     # from https://console.anthropic.com
-internmatch serve
-```
-
-Then open the **AI review** tab. It makes one API call (model `claude-opus-5-5` by default; override with `INTERNMATCH_MODEL`). That call sends your resume text and your top 20 recommended postings to Anthropic. Nothing else in the app needs a key or sends your resume anywhere.
-
-## Where the internships come from
-
-| Source | What it gives | Setup |
+| Source | Best for | Key |
 |---|---|---|
-| [SimplifyJobs internship list](https://github.com/SimplifyJobs/Summer2027-Internships) | ~4,000+ active tech internships (software, AI/ML/data, hardware, quant, product), updated many times a day | Automatic. Cached for 6 hours in `~/.cache/internmatch` |
-| Greenhouse / Lever / Ashby job boards | Every internship at a specific company, **with full job descriptions** | Add `greenhouse:stripe`, `lever:palantir`, `ashby:ramp` (or board URLs) under *Advanced options* or with `--board` |
-| Job-description lookup | For top matches that link to Greenhouse, Lever or Ashby, the real description is fetched and the role is re-scored against it | On by default. Turn off with *Fetch full job descriptions* / `--no-enrich` |
+| The Muse | Corporate internships in legal, finance, business, marketing, media, writing and education | None needed |
+| **USAJOBS** | Federal internships and Pathways student jobs: DOJ, State Department, Library of Congress, Smithsonian, National Archives and more. **The best source for pre-law, policy, museum and archive roles.** | Free, instant: [developer.usajobs.gov/apirequest](https://developer.usajobs.gov/apirequest/) |
+| **Adzuna** | A large aggregator of listings from across the web: legal, finance, consulting, marketing, creative, teaching and nonprofit internships | Free: [developer.adzuna.com/signup](https://developer.adzuna.com/signup) |
+| Employer job boards | Every internship at a specific employer that uses Greenhouse, Lever or Ashby | Add `greenhouse:employer` under *Advanced options* |
+
+Postings that are clearly tech, science or healthcare are filtered out so the list stays on-topic.
 
 ## How the scoring works
 
@@ -64,44 +58,53 @@ Everything except the optional AI review is deterministic and runs locally, so y
 
 | Part | Weight | What it measures |
 |---|---|---|
-| Impact & writing | 25% | Share of bullets that open with an action verb, include a number (users, %, $, scale) and are 6–35 words. Penalizes "Responsible for…"/"Worked on…" and first-person pronouns |
-| Experience | 25% | Internships, other roles, projects, research, leadership, awards and open source, **compared with what's typical for your year** (a freshman isn't expected to have two internships) |
-| Skills | 20% | Breadth of recognized technical skills (~150 in the taxonomy, with aliases) and depth in your best-fit role type |
-| Academics | 10% | GPA (from the resume or your override) and whether you list relevant coursework |
-| Format & completeness | 20% | Education, experience/projects and skills sections, contact info (email, phone, LinkedIn, GitHub/portfolio) and length (one full page) |
+| Impact & writing | 25% | Bullets that open with an action verb (Drafted, Researched, Organized…), show scale with a number (people served, articles written, dollars raised) and run 6–35 words. Penalizes "Responsible for…" and first-person pronouns |
+| Experience & involvement | 25% | Internships and jobs, plus the things these fields weigh heavily: leadership positions, mock trial, moot court, debate and Model UN, the campus paper and other publications, research and theses, tutoring, volunteering and study abroad. **Compared with what's typical for your year** |
+| Skills & languages | 15% | Recognized skills (Westlaw, LexisNexis, Excel modeling, Bloomberg, Adobe, AP style, archival research, grant writing… ~150 in all), depth in your target area, and foreign languages |
+| Academics | 15% | GPA (weighed more heavily when you target law, finance or consulting), honors (Dean's List, honor societies, scholarships) and relevant coursework |
+| Format & completeness | 20% | Education first, the key sections, contact details including LinkedIn, one full page, no Objective line, and a portfolio or writing-samples link for media, marketing and arts roles |
 
 ### Interview odds
 
 Every posting you're eligible for gets two numbers:
 
-- **Resume fit (0–100%)**: how well your skills cover the role. The inputs are the full job description when one is available, the skills implied by the title (e.g. "Embedded" → C/C++ + embedded systems), your affinity for the posting's category and whether the role's keywords appear in your resume.
+- **Resume fit (0–100%)**: how well your background covers the role. It uses the job description, the skills the title implies (e.g. "Paralegal" → legal research, legal writing, Westlaw/Lexis) and your fit for the posting's area.
 - **Interview odds (0–100)**: fit × competitiveness × timing × seniority.
-  - *Competitiveness* compares your candidate strength with the company's selectivity. There are three tiers: standard, highly competitive (e.g. Microsoft, Amazon, Bloomberg) and extremely selective (e.g. Jane Street, Citadel, Google, OpenAI). Extremely selective companies are capped, so they're never marked "Likely" from a cold application.
-  - *Timing*: postings from the last few days rank higher, since early applicants get most interviews, and month-old postings are flagged.
-  - *Seniority*: freshmen and sophomores get a boost on programs aimed at them and a small haircut elsewhere.
+  - *Competitiveness* compares your candidate strength with the employer's selectivity. There are three tiers: standard; highly competitive (e.g. large law firms, Big Four, major newsrooms, federal agencies); and extremely selective (e.g. elite law firms, bulge-bracket banks, MBB consulting, the Met, the Smithsonian, top think tanks). Extremely selective employers are capped, so they're never "Likely" from a cold application.
+  - *Timing*: postings from the last few days rank higher, and application deadlines are flagged.
+  - *Seniority*: freshmen and sophomores get a boost on programs aimed at them.
 
-Tiers: **Likely** ≥ 70, **Target** 50–69, **Reach** < 50. The **Recommended** list takes the highest-odds roles, fills it with Likely/Target before any Reach, and allows at most two roles per company.
+Tiers: **Likely** ≥ 70, **Target** 50–69, **Reach** < 50. The **Recommended** list takes the highest-odds roles, fills it with Likely and Target before any Reach, and allows at most two per employer.
 
-Before scoring, postings you can't apply to are hidden and counted: wrong term, a degree requirement you don't meet (e.g. PhD-only), roles that don't sponsor visas when you need sponsorship (from the listing or detected in the description), programs reserved for underclassmen when you're a junior or senior, and duplicates.
+Before scoring, postings you can't apply to are hidden and counted: roles for **law students** (1L/2L, summer associate, J.D. candidates) when you're an undergraduate, MBA or PhD roles, high-school programs, visa and citizenship restrictions that apply to you, programs reserved for underclassmen when you're a junior or senior, closed deadlines, and (if you ask) unpaid roles.
 
-> **Treat the odds as a ranking, not a promise.** They are heuristics built from the signals recruiters are known to weigh. The app can't see referrals, your school's recruiting pipeline or how many people applied. Use the tiers the way you'd use a college list: apply to plenty of Likely and Target roles and a handful of Reaches.
+> **Treat the odds as a ranking, not a promise.** They're heuristics built from signals recruiters are known to weigh. The app can't see referrals, networking, your school's recruiting pipeline or how many people applied. Use the tiers like a college list: apply to plenty of Likely and Target roles and a handful of Reaches.
 
-![Resume report](docs/screenshot-report.png)
+![Resume report (demo data)](docs/screenshot-report.png)
+
+## Resume formats
+
+PDF and Word (.docx) work everywhere. On a Mac, older Word (.doc), RTF and OpenDocument files work too, via macOS's built-in `textutil`. For Pages, choose **File › Export To › PDF** first.
 
 ## Privacy
 
-- Your resume is parsed on your machine by the local server. The only network calls are downloads of public job listings.
-- The AI review is opt-in, per click, and sends your resume text to the Anthropic API.
-- "Applied" checkmarks and form preferences are stored in your browser's local storage.
+- Your resume is parsed on your computer by the local app. The only network calls are downloads of public job listings.
+- The app only answers requests from your own computer, and blocks other websites from sending it commands.
+- API keys are saved in a settings file only you can read: `~/Library/Application Support/internmatch/config.json` on a Mac.
+- The AI review is opt-in, per click, and sends your resume text and top matches to the Anthropic API.
 
-## Configuration
+## Command line
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `ANTHROPIC_API_KEY` | unset | Enables the AI review (`ant auth login` also works) |
-| `INTERNMATCH_MODEL` | `claude-opus-5-5` | Claude model used for the AI review |
-| `INTERNMATCH_CACHE_DIR` | `~/.cache/internmatch` | Where listings and fetched job descriptions are cached |
-| `INTERNMATCH_LISTINGS_URL` | next summer's SimplifyJobs feed | Point at a different `listings.json` in the same format |
+```bash
+internmatch analyze resume.pdf --track Pre-Law --location DC --location NYC --top 25
+internmatch analyze resume.pdf --track Business --paid-only --csv matches.csv
+internmatch config set usajobs_email you@school.edu
+internmatch config set usajobs_api_key YOUR_KEY
+internmatch doctor --verbose       # check setup and whether each job source is reachable
+internmatch refresh                # re-download listings now
+```
+
+Settings can also come from environment variables: `USAJOBS_API_KEY`, `USAJOBS_EMAIL`, `ADZUNA_APP_ID`, `ADZUNA_APP_KEY`, `ANTHROPIC_API_KEY`, `THEMUSE_API_KEY` (optional), plus `INTERNMATCH_MODEL` (default `claude-opus-5-5`) and `INTERNMATCH_CACHE_DIR`.
 
 ## Development
 
@@ -110,18 +113,20 @@ pip install -e ".[dev]"
 pytest
 ```
 
-The tests run offline. HTTP calls are served by `httpx.MockTransport`, and the Claude client is faked.
+The tests run offline: HTTP calls are served by `httpx.MockTransport` and the Claude client is faked. CI runs them on Ubuntu and macOS, and also runs `start.command` on a real macOS runner.
 
 ```
+start.command   macOS launcher (sets up Python and the app, then starts it)
 internmatch/
-  resume.py     text extraction (PDF/DOCX/TXT), parsing and the resume rubric
-  skills.py     skill taxonomy, extraction, category signatures, title → requirement rules
-  matcher.py    eligibility filters, fit, interview odds, tiers, shortlist
-  companies.py  company selectivity tiers
-  sources.py    SimplifyJobs feed, Greenhouse/Lever/Ashby boards, description lookup, caching
+  resume.py     text extraction (PDF, Word, RTF, Pages) and the resume rubric
+  skills.py     skill taxonomy, languages, areas and tracks, title classification and requirements
+  matcher.py    eligibility filters, fit, interview odds, tiers, shortlist, paste-a-posting check
+  companies.py  employer selectivity tiers
+  sources.py    The Muse, USAJOBS, Adzuna, employer boards; caching, pay/term/deadline detection
+  config.py     API keys and per-OS folders
   engine.py     end-to-end pipeline used by the web app and CLI
   ai.py         optional Claude review (structured output)
   server.py     FastAPI JSON API + static UI
   static/       single-page web UI (no build step)
-tests/          pytest suite with fixture resumes
+tests/          pytest suite with pre-law, business, humanities and weak fixture resumes
 ```

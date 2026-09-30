@@ -1,45 +1,64 @@
-from internmatch.skills import canonical, extract_skills, normalize_category, title_requirements
+from internmatch.skills import (
+    canonical,
+    categories_for,
+    classify,
+    extract_languages,
+    extract_skills,
+    title_requirements,
+)
 
 
-def test_symbols_and_short_names():
-    found = extract_skills("Languages: C/C++, C#, Go, R, Node.js, .NET, Objective-C")
-    for name in ("C", "C++", "C#", "Go", "R", "Node.js", ".NET", "Objective-C"):
-        assert name in found, name
-    # "js" inside "node.js" must not count as JavaScript
-    assert "JavaScript" not in found
-
-
-def test_java_is_not_javascript():
-    found = extract_skills("Built a JavaScript app")
-    assert "JavaScript" in found and "Java" not in found
+def test_legal_business_and_humanities_skills():
+    text = """Conducted legal research on Westlaw; drafted legal memos in Bluebook format for a law firm.
+    Built DCF and LBO models in Excel; M&A pitch books; passed the SIE exam.
+    Copyedited 30 stories in AP style for the student newspaper; catalogued prints for the museum archives.
+    Wrote grant proposals and coordinated volunteers; ran Instagram and TikTok accounts using Canva."""
+    found = set(extract_skills(text))
+    assert {"Legal Research", "Westlaw", "Legal Writing", "Bluebook", "Legal Office Experience"} <= found
+    assert {"Valuation", "Excel", "Investment Banking", "Securities Licenses"} <= found
+    assert {"Copyediting", "Style Guides", "Journalism", "Collections Management", "Archival Research"} <= found
+    assert {"Grant Writing", "Volunteer Coordination", "Social Media", "Canva"} <= found
 
 
 def test_common_false_positives_are_ignored():
-    text = "Spring 2025 semester. I excel at teamwork and react to incidents quickly. John C. Smith. R&D lab."
+    text = "I excel at teamwork. April events in Spring 2025. John R. Smith; R&D lab; Latin honors; Greek life."
     found = extract_skills(text)
-    assert not {"Spring", "Excel", "React", "C", "R"} & set(found)
+    assert not {"Excel", "Public Relations", "R", "Latin", "Greek", "Event Planning"} & set(found)
 
 
-def test_aliases_map_to_canonical_names():
-    found = extract_skills("Used sklearn, k8s, postgres and GitHub Actions")
-    assert {"scikit-learn", "Kubernetes", "PostgreSQL", "CI/CD"} <= set(found)
-    assert canonical("golang") == "Go"
-    assert canonical("pytorch") == "PyTorch"
-    assert canonical("not a real skill") is None
+def test_languages_need_language_context():
+    assert extract_languages("Languages: Spanish (fluent), Mandarin (conversational)") == {"Spanish": 1, "Mandarin": 1}
+    assert extract_languages("Wrote a thesis on the French Revolution") == {}
+    assert extract_languages("Bilingual in English and Chinese") == {"Mandarin": 1}
 
 
-def test_normalize_category():
-    assert normalize_category("Software Engineering") == "Software"
-    assert normalize_category("Data Science, AI & Machine Learning") == "AI/ML/Data"
-    assert normalize_category("Quantitative Finance") == "Quant"
-    assert normalize_category("Hardware Engineering") == "Hardware"
-    assert normalize_category("Product Management") == "Product"
-    assert normalize_category(None) == "Other"
+def test_canonical():
+    assert canonical("lexis") == "LexisNexis"
+    assert canonical("mock trial") == "Mock Trial"
+    assert canonical("spanish") == "Spanish"
+    assert canonical("underwater basket weaving") is None
 
 
-def test_title_requirements_prefers_specific_rules():
-    labels = [label for label, _ in title_requirements("Backend Software Engineer Intern")]
-    assert labels == ["Backend"]
-    labels = [label for label, _ in title_requirements("Software Engineer Intern")]
-    assert labels == ["General software"]
-    assert title_requirements("Marketing Intern") == []
+def test_classify_titles():
+    assert classify("Legal Intern") == ("Legal", "strong")
+    assert classify("Healthcare Policy Intern") == ("Government & Policy", "strong")
+    assert classify("Summer Analyst - Investment Banking")[0] == "Finance & Accounting"
+    assert classify("Curatorial Intern")[0] == "Arts & Culture"
+    assert classify("Development Intern")[0] == "Nonprofit & Advocacy"
+    assert classify("Software Engineering Intern") == ("Other", "off")
+    assert classify("Clinical Research Intern") == ("Other", "off")
+    assert classify("Data Analyst Intern") == ("Consulting & Business", "weak")
+    assert classify("Summer Intern") == (None, "none")
+
+
+def test_tracks_expand_to_categories():
+    assert categories_for(["Pre-Law"]) == {"Legal", "Government & Policy", "Nonprofit & Advocacy"}
+    assert "Marketing & Communications" in categories_for(["Business"])
+    assert categories_for([], ["Legal"]) == {"Legal"}
+    assert len(categories_for([])) == 9
+
+
+def test_title_requirements():
+    assert [label for label, _ in title_requirements("Paralegal Intern")] == ["Legal"]
+    assert "Investment finance" in [label for label, _ in title_requirements("Investment Banking Summer Analyst")]
+    assert [label for label, _ in title_requirements("Summer Intern")] == ["General"]

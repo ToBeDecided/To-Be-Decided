@@ -1,0 +1,28 @@
+Ethan Park
+ethan.park@example.edu | 555-301-4420 | New York, NY | linkedin.com/in/ethanpark
+
+EDUCATION
+Hudson University, Stern School of Business — B.B.A. in Finance, Minor in Economics     Expected May 2027
+GPA: 3.68/4.0 | Dean's List | Beta Gamma Sigma
+Relevant Coursework: Corporate Finance, Financial Accounting, Valuation, Econometrics
+
+EXPERIENCE
+Commercial Banking Summer Analyst, Riverbend Community Bank                            Jun 2026 – Aug 2026
+• Built 3-statement financial models and credit memos for 5 middle-market borrowers with $10–50M revenue
+• Analyzed financial statements and covenant compliance, flagging 2 at-risk loans totaling $8M
+• Presented an industry analysis of regional healthcare services to the credit committee in PowerPoint
+Operations Intern, Brightline Logistics                                                May 2025 – Aug 2025
+• Streamlined invoice reconciliation in Excel with VLOOKUP and pivot tables, cutting monthly close by 3 days
+• Created a Tableau dashboard tracking on-time delivery for 120 routes, used by the operations director
+
+LEADERSHIP & ACTIVITIES
+Portfolio Manager, Student Investment Fund                                             Sep 2025 – Present
+• Manage a $250K consumer sector portfolio; pitched 4 stocks using DCF and comparable company analysis
+Vice President, Consulting Club                                                         Sep 2024 – Present
+• Won 1st place of 30 teams at the Northeast Case Competition with a market-entry strategy for a retailer
+• Organized 6 case interview workshops attended by 150 students
+
+SKILLS & INTERESTS
+Technical: Excel (financial modeling, VLOOKUP, pivot tables), PowerPoint, Capital IQ, Bloomberg Market Concepts, SQL, Tableau
+Certifications: SIE Exam (passed)
+Interests: marathon running, jazz piano, NBA analytics

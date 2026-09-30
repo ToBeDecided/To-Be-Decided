@@ -14,14 +14,16 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from . import config
 from .models import Match, Profile, ResumeReport
 
 MODEL = os.environ.get("INTERNMATCH_MODEL", "claude-opus-5-5")
 MAX_POSTINGS = 20
 
-SYSTEM_PROMPT = """You are a senior university recruiter who has screened thousands of internship \
-applications for tech, data, hardware, quant and product roles. You are reviewing one student's resume \
-and a shortlist of internships an automated matcher picked for them.
+SYSTEM_PROMPT = """You are a senior university recruiter and pre-professional advisor who has screened \
+thousands of internship applications in law and government, finance and consulting, marketing and \
+communications, media and publishing, museums and the arts, education, and nonprofits. You are reviewing \
+one student's resume and a shortlist of internships an automated matcher picked for them.
 
 Ground every statement in the resume text you are given: never invent experience, employers, numbers or \
 skills. When a rewrite needs a metric the resume doesn't state, use a bracketed placeholder such as \
@@ -59,11 +61,11 @@ class AIError(RuntimeError):
 
 
 def available() -> bool:
-    """True if Anthropic credentials are likely configured (API key, auth token, or `ant auth login`)."""
-    if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
+    """True if Anthropic credentials are likely configured (Settings, env var, or `ant auth login`)."""
+    if config.get("anthropic_api_key") or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
         return True
-    config = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "anthropic"
-    return config.is_dir() and any(config.iterdir())
+    profile_dir = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "anthropic"
+    return profile_dir.is_dir() and any(profile_dir.iterdir())
 
 
 def _posting_brief(m: Match) -> dict:
@@ -77,6 +79,7 @@ def _posting_brief(m: Match) -> dict:
         "locations": p.locations[:3],
         "terms": p.terms,
         "posted_days_ago": None if age is None else round(age),
+        "pay": p.pay_detail or p.pay,
         "company_selectivity": m.selectivity,
         "matcher_tier": m.tier,
         "matched_skills": m.matched_skills,
@@ -109,7 +112,8 @@ def build_prompt(resume_text: str, profile: Profile, report: ResumeReport | None
 that 50 is a typical applicant and 85+ is a resume that gets interviews at most companies it applies to.
 2. summary: two or three sentences a recruiter would say after a 30-second skim.
 3. strengths and weaknesses: 3-5 each, specific to this resume (the automated check is a starting point; \
-add what it can't see, such as project depth, narrative and relevance to their targets).
+add what it can't see, such as the story the resume tells, depth of leadership, writing quality and \
+relevance to their targets; for pre-law students, note what law firms and law school admissions value).
 4. bullet_rewrites: up to 5 of the weakest bullets, quoting the original exactly, with an improved version \
 that keeps the facts and a short reason.
 5. keywords_to_add: skills or terms the shortlisted postings want that the resume lacks. Only include ones \
@@ -133,7 +137,9 @@ def review(
     if not resume_text.strip():
         raise AIError("No resume text to review.", status=400)
     matches = matches or []
-    client = client or anthropic.Anthropic()
+    if client is None:
+        key = config.get("anthropic_api_key")
+        client = anthropic.Anthropic(api_key=key) if key else anthropic.Anthropic()
     try:
         response = client.beta.messages.parse(
             model=MODEL,
@@ -147,7 +153,7 @@ def review(
             output_format=AIReview,
         )
     except anthropic.AuthenticationError as exc:
-        raise AIError("Anthropic rejected the API key. Check ANTHROPIC_API_KEY.", status=401) from exc
+        raise AIError("Anthropic rejected the API key. Check it in Settings.", status=401) from exc
     except anthropic.PermissionDeniedError as exc:
         raise AIError("This API key doesn't have access to the model. Set INTERNMATCH_MODEL.", status=403) from exc
     except anthropic.NotFoundError as exc:

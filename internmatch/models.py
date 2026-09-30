@@ -7,9 +7,10 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-DegreeLevel = Literal["high_school", "associate", "bachelor", "master", "phd", "mba"]
+DegreeLevel = Literal["high_school", "associate", "bachelor", "master", "phd", "mba", "jd"]
 WorkAuth = Literal["citizen", "authorized", "needs_sponsorship"]
 Sponsorship = Literal["unknown", "offers", "no_sponsorship", "citizenship_required"]
+Pay = Literal["paid", "stipend", "unpaid", "unknown"]
 
 
 class Profile(BaseModel):
@@ -22,7 +23,10 @@ class Profile(BaseModel):
     gpa: float | None = Field(default=None, ge=0, le=4.5)
     work_authorization: WorkAuth = "citizen"
     target_terms: list[str] = Field(default_factory=list)
+    include_unknown_terms: bool = True  # keep postings that don't say which term they're for
+    target_tracks: list[str] = Field(default_factory=list)  # "Pre-Law", "Business", "Humanities"
     target_categories: list[str] = Field(default_factory=list)
+    paid_only: bool = False
     locations: list[str] = Field(default_factory=list)
     remote_ok: bool = True
     location_strict: bool = False
@@ -45,6 +49,10 @@ class Posting(BaseModel):
     degrees: list[str] = Field(default_factory=list)
     description: str = ""
     active: bool = True
+    pay: Pay = "unknown"
+    pay_detail: str = ""
+    deadline: datetime | None = None
+    source_category: str = ""
 
     def age_days(self, now: datetime | None = None) -> float | None:
         if self.date_posted is None:
@@ -89,6 +97,7 @@ class CategoryFit(BaseModel):
 class ProfileSummary(BaseModel):
     candidate_strength: int
     level: str  # e.g. "Sophomore"
+    track_fit: list[CategoryFit] = Field(default_factory=list)  # Pre-Law / Business / Humanities
     category_fit: list[CategoryFit]
     notes: list[str]
 

@@ -1,19 +1,20 @@
 Sam Rivera
 samrivera@example.com
 
-Education
-Lakeside Community College, Associate of Science in Computer Science, 2027
+Objective
+To obtain an internship where I can use my skills.
 
 Experience
 Cashier, Corner Grocery 2024 - Present
 - Responsible for handling customer transactions
 - Helped with inventory
 
-Projects
-Personal Website
-- Made a website using HTML and CSS
-Calculator App
-- Worked on a calculator in Java for a class
+Activities
+Member of Book Club
+- Attended meetings
+
+Education
+Lakeside Community College, Associate of Arts in Liberal Arts, 2027
 
 Skills
-Java, HTML, CSS, Microsoft Office
+Microsoft Office

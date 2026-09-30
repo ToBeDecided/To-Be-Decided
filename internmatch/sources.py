@@ -1,11 +1,16 @@
 """Where internship postings come from.
 
-* SimplifyJobs' community-maintained internship list (default; thousands of
-  active tech internships, refreshed many times a day).
-* Public job-board APIs for individual companies: Greenhouse, Lever and Ashby.
-  These include full job descriptions, which makes matching much sharper.
-* Description enrichment: for Simplify postings that link to a Greenhouse,
-  Lever or Ashby page, we can fetch the real description for the top matches.
+* The Muse (no key needed): internships in legal, finance, business,
+  marketing, media, writing, education and nonprofit categories.
+* USAJOBS (free key): federal internships and Pathways student jobs; the best
+  source for pre-law, policy, museum, archive and library roles.
+* Adzuna (free key): a large aggregator; searched for internships in legal,
+  finance, consulting, marketing, creative, teaching and nonprofit categories.
+* Greenhouse / Lever / Ashby company boards: every internship at a specific
+  employer, with full descriptions.
+
+Everything is filtered to pre-law, business and humanities roles: postings
+that are clearly tech, science or healthcare are dropped.
 """
 
 from __future__ import annotations
@@ -14,56 +19,25 @@ import asyncio
 import html
 import json
 import logging
-import os
 import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Awaitable, Callable, Iterable
 
 import httpx
 
+from . import config
 from .models import Posting
-from .skills import normalize_category
+from .skills import classify
 
 log = logging.getLogger(__name__)
 
-USER_AGENT = "internmatch/0.1 (+https://github.com/tobedecided/to-be-decided)"
-SIMPLIFY_URL_TEMPLATE = (
-    "https://raw.githubusercontent.com/SimplifyJobs/Summer{year}-Internships/dev/.github/scripts/listings.json"
-)
-
-_SPONSORSHIP = {
-    "offers sponsorship": "offers",
-    "does not offer sponsorship": "no_sponsorship",
-    "u.s. citizenship is required": "citizenship_required",
-}
-_DEGREES = {
-    "bachelor's": "bachelor",
-    "bachelors": "bachelor",
-    "master's": "master",
-    "masters": "master",
-    "phd": "phd",
-    "associate's": "associate",
-    "mba": "mba",
-    "high school": "high_school",
-}
-_TERM_RX = re.compile(r"\b(summer|fall|autumn|winter|spring)\s*'?(20\d{2}|\d{2})\b", re.I)
-_INTERN_RX = re.compile(r"\bintern(ship)?s?\b|\bco-?op\b|\bapprentice", re.I)
-
-
-def simplify_urls(now: datetime | None = None) -> list[str]:
-    """Candidate URLs for the Simplify listings feed, most relevant first.
-
-    The repo is renamed each recruiting season (Summer2026-Internships,
-    Summer2027-Internships, ...), so try next summer's repo first from July on.
-    """
-    override = os.environ.get("INTERNMATCH_LISTINGS_URL")
-    if override:
-        return [override]
-    now = now or datetime.now(timezone.utc)
-    years = [now.year + 1, now.year] if now.month >= 7 else [now.year, now.year + 1]
-    return [SIMPLIFY_URL_TEMPLATE.format(year=y) for y in years]
+USER_AGENT = "internmatch/0.2 (+https://github.com/ToBeDecided/To-Be-Decided)"
+_TERM_RX = re.compile(r"\b(summer|fall|autumn|winter|spring)\s*(?:semester\s*)?'?(20\d{2}|\d{2})\b", re.I)
+_INTERN_RX = re.compile(r"\bintern(ship)?s?\b|\bco-?op\b|\bapprentice|\bextern(ship)?\b|\bstudent trainee\b|"
+                        r"\bsummer (analyst|associate|fellow)|\bfellowship\b|\bstudent (assistant|aide|worker)\b",
+                        re.I)
 
 
 def _ts(value: Any) -> datetime | None:
@@ -71,66 +45,16 @@ def _ts(value: Any) -> datetime | None:
         return None
     try:
         if isinstance(value, (int, float)):
-            # Lever uses milliseconds, Simplify uses seconds.
+            # Lever uses milliseconds.
             seconds = value / 1000 if value > 10**11 else value
             return datetime.fromtimestamp(seconds, tz=timezone.utc)
-        text = str(value).replace("Z", "+00:00")
+        text = str(value).strip().replace("Z", "+00:00")
+        # USAJOBS sends seven fractional digits ("2026-09-15T00:00:00.0000000"); Python accepts up to six.
+        text = re.sub(r"(\.\d{6})\d+", r"\1", text)
         dt = datetime.fromisoformat(text)
         return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
     except (ValueError, OSError, OverflowError):
         return None
-
-
-def parse_simplify(data: Iterable[dict[str, Any]]) -> list[Posting]:
-    postings: list[Posting] = []
-    for row in data:
-        if not row.get("active") or not row.get("is_visible", True):
-            continue
-        title = (row.get("title") or "").strip()
-        company = (row.get("company_name") or "").strip()
-        if not title or not company:
-            continue
-        terms = [t for t in (row.get("terms") or []) if t and t != "N/A"]
-        postings.append(
-            Posting(
-                id=f"simplify:{row.get('id')}",
-                source="Simplify",
-                company=company,
-                title=title,
-                category=normalize_category(row.get("category")),
-                locations=[loc for loc in (row.get("locations") or []) if loc],
-                url=row.get("url") or "",
-                terms=terms or terms_from_title(title),
-                date_posted=_ts(row.get("date_posted")),
-                sponsorship=_SPONSORSHIP.get((row.get("sponsorship") or "").strip().lower(), "unknown"),
-                degrees=[_DEGREES.get(d.strip().lower(), d.strip().lower()) for d in row.get("degrees") or []],
-            )
-        )
-    return postings
-
-
-def terms_from_title(title: str) -> list[str]:
-    out = []
-    for season, year in _TERM_RX.findall(title):
-        season = "Fall" if season.lower() == "autumn" else season.capitalize()
-        year = year if len(year) == 4 else f"20{year}"
-        out.append(f"{season} {year}")
-    return out
-
-
-def category_from_title(title: str) -> str:
-    t = title.lower()
-    if re.search(r"quant|trading|trader", t):
-        return "Quant"
-    if re.search(r"product manag|\bapm\b|\bpm\b|product design|designer|\bux\b", t):
-        return "Product"
-    if re.search(r"hardware|electrical|fpga|asic|analog|circuit|silicon|\brf\b|verification|pcb|mechanical", t):
-        return "Hardware"
-    if re.search(r"machine learning|\bml\b|\bai\b|data|analytic|analyst|research scien", t):
-        return "AI/ML/Data"
-    if re.search(r"software|engineer|developer|\bswe\b|backend|frontend|full[\s-]?stack|devops|security", t):
-        return "Software"
-    return "Other"
 
 
 def html_to_text(raw: str) -> str:
@@ -146,8 +70,392 @@ def html_to_text(raw: str) -> str:
     return text.strip()
 
 
+def terms_from_text(title: str, description: str = "") -> list[str]:
+    """Internship terms ("Summer 2027") named in the title, else in the description."""
+    for text in (title, description[:4000]):
+        out: list[str] = []
+        for season, year in _TERM_RX.findall(text or ""):
+            season = "Fall" if season.lower() == "autumn" else season.capitalize()
+            year = year if len(year) == 4 else f"20{year}"
+            term = f"{season} {year}"
+            if term not in out:
+                out.append(term)
+        if out:
+            return out[:3]
+    return []
+
+
 # ---------------------------------------------------------------------------
-# Company job boards
+# Pay
+# ---------------------------------------------------------------------------
+
+_UNPAID_RX = re.compile(
+    r"\bunpaid\b|without compensation|no compensation|not a paid|volunteer (position|internship|opportunity)|"
+    r"for academic credit only|(academic|college|course) credit (only|in lieu)|this is a volunteer",
+    re.I,
+)
+_STIPEND_RX = re.compile(r"\bstipends?\b", re.I)
+_PAY_AMOUNT_RX = re.compile(
+    r"\$\s?\d[\d,]*(?:\.\d+)?\s*[kK]?(?:\s*(?:-|–|—|to)\s*\$?\s?\d[\d,]*(?:\.\d+)?\s*[kK]?)?\s*"
+    r"(?:/|per|an|a)\s*(?:hour|hr|week|wk|month|mo|year|yr|annum)\b",
+    re.I,
+)
+_PAID_HINT_RX = re.compile(r"\bpaid internship\b|\bhourly (rate|wage|pay)\b|\bpay range\b|\bcompensation\b.{0,20}\$|"
+                           r"\bcompetitive (pay|compensation|salary)\b", re.I)
+
+
+def detect_pay(text: str) -> tuple[str, str]:
+    """("paid" | "stipend" | "unpaid" | "unknown", short detail) from free text."""
+    if not text:
+        return "unknown", ""
+    amount = _PAY_AMOUNT_RX.search(text)
+    if amount:
+        return "paid", re.sub(r"\s+", " ", amount.group(0)).strip()
+    unpaid = _UNPAID_RX.search(text)
+    if unpaid:
+        return "unpaid", "For academic credit" if "credit" in unpaid.group(0).lower() else "Unpaid"
+    if _STIPEND_RX.search(text):
+        return "stipend", "Stipend"
+    if _PAID_HINT_RX.search(text):
+        return "paid", "Paid"
+    return "unknown", ""
+
+
+# ---------------------------------------------------------------------------
+# Building postings
+# ---------------------------------------------------------------------------
+
+
+def make_posting(
+    *,
+    id: str,
+    source: str,
+    company: str,
+    title: str,
+    url: str,
+    description: str = "",
+    locations: list[str] | None = None,
+    date_posted: Any = None,
+    source_category: str = "",
+    hint_category: str | None = None,
+    default_category: str | None = None,
+    pay: tuple[str, str] | None = None,
+    deadline: Any = None,
+) -> Posting | None:
+    """Classify and normalize one posting. Returns None for off-focus or unclassifiable roles."""
+    title = re.sub(r"\s+", " ", html_to_text(title)).strip()
+    if not title:
+        return None
+    category, how = classify(title)
+    if how == "off":
+        return None
+    if how != "strong":
+        # The source's own label ("Legal Services") beats a weak title guess like "analyst".
+        label_cat, label_how = classify(source_category)
+        if label_how == "off" and how == "none":
+            return None
+        if label_how == "strong":
+            category = label_cat
+        elif hint_category:
+            category = hint_category
+        elif category is None:
+            category = default_category
+    if category is None:
+        return None
+    pay_kind, pay_detail = pay if pay and pay[0] != "unknown" else detect_pay(f"{title}\n{description}")
+    return Posting(
+        id=id,
+        source=source,
+        company=(company or "").strip() or "Unknown organization",
+        title=title,
+        category=category,
+        locations=[loc.strip() for loc in (locations or []) if loc and loc.strip()],
+        url=url or "",
+        terms=terms_from_text(title, description),
+        date_posted=_ts(date_posted),
+        description=description.strip(),
+        pay=pay_kind,  # type: ignore[arg-type]
+        pay_detail=pay_detail,
+        deadline=_ts(deadline),
+        source_category=source_category,
+    )
+
+
+# ---------------------------------------------------------------------------
+# The Muse
+# ---------------------------------------------------------------------------
+
+MUSE_URL = "https://www.themuse.com/api/public/jobs"
+# Muse category name -> our category (used when a job title alone is ambiguous).
+MUSE_CATEGORIES: dict[str, str] = {
+    "Legal Services": "Legal",
+    "Law": "Legal",
+    "Accounting and Finance": "Finance & Accounting",
+    "Accounting": "Finance & Accounting",
+    "Finance": "Finance & Accounting",
+    "Business Operations": "Consulting & Business",
+    "Management": "Consulting & Business",
+    "Project Management": "Consulting & Business",
+    "Human Resources and Recruitment": "Consulting & Business",
+    "Sales": "Consulting & Business",
+    "Advertising and Marketing": "Marketing & Communications",
+    "Marketing": "Marketing & Communications",
+    "Media, PR, and Communications": "Marketing & Communications",
+    "Public Relations": "Marketing & Communications",
+    "Social Media": "Marketing & Communications",
+    "Writing and Editing": "Media & Writing",
+    "Editor": "Media & Writing",
+    "Writer": "Media & Writing",
+    "Arts": "Arts & Culture",
+    "Education": "Education & Research",
+    "Social Services": "Nonprofit & Advocacy",
+    "Nonprofit": "Nonprofit & Advocacy",
+}
+MUSE_PAGES_PER_CATEGORY = 3
+MUSE_GENERAL_PAGES = 5
+
+
+def parse_muse(data: dict[str, Any], query_category: str | None = None) -> list[Posting]:
+    out = []
+    for job in data.get("results") or []:
+        cats = [c.get("name", "") for c in job.get("categories") or [] if isinstance(c, dict)]
+        hint = next((MUSE_CATEGORIES[c] for c in cats if c in MUSE_CATEGORIES), None)
+        if hint is None and query_category:
+            hint = MUSE_CATEGORIES.get(query_category)
+        refs = job.get("refs") or {}
+        p = make_posting(
+            id=f"muse:{job.get('id')}",
+            source="The Muse",
+            company=(job.get("company") or {}).get("name", ""),
+            title=job.get("name") or "",
+            url=refs.get("landing_page") or "",
+            description=html_to_text(job.get("contents") or ""),
+            locations=[loc.get("name", "") for loc in job.get("locations") or [] if isinstance(loc, dict)],
+            date_posted=job.get("publication_date"),
+            source_category=", ".join(cats),
+            hint_category=hint,
+        )
+        if p:
+            out.append(p)
+    return out
+
+
+async def fetch_muse(client: httpx.AsyncClient, settings: Callable[[str], str | None]) -> tuple[list[Posting], dict]:
+    key = settings("themuse_api_key")
+    base: list[tuple[str, Any]] = [("level", "Internship")] + ([("api_key", key)] if key else [])
+    sem = asyncio.Semaphore(4)
+    detail: dict[str, Any] = {}
+
+    async def query(category: str | None, max_pages: int) -> list[Posting]:
+        found: list[Posting] = []
+        page, page_count, total = 1, 1, None
+        while page <= min(page_count, max_pages):
+            params = base + [("page", page)] + ([("category", category)] if category else [])
+            async with sem:
+                resp = await client.get(MUSE_URL, params=params)
+            resp.raise_for_status()
+            data = resp.json()
+            page_count, total = int(data.get("page_count") or 1), data.get("total")
+            found.extend(parse_muse(data, category))
+            page += 1
+        detail[category or "(all internships)"] = {"kept": len(found), "pages": page_count, "total": total}
+        return found
+
+    labels = list(MUSE_CATEGORIES) + [None]
+    results = await asyncio.gather(*(query(c, MUSE_PAGES_PER_CATEGORY) for c in MUSE_CATEGORIES),
+                                   query(None, MUSE_GENERAL_PAGES), return_exceptions=True)
+    postings: dict[str, Posting] = {}
+    errors = []
+    for cat, res in zip(labels, results):
+        if isinstance(res, BaseException):
+            errors.append(f"{cat or 'all'}: {res}")
+            detail[cat or "(all internships)"] = {"error": str(res)[:200]}
+            continue
+        for p in res:
+            postings.setdefault(p.id, p)
+    if len(errors) == len(results):
+        raise RuntimeError("; ".join(errors[:3]))
+    return list(postings.values()), {"queries": detail, "partial_errors": len(errors)}
+
+
+# ---------------------------------------------------------------------------
+# USAJOBS
+# ---------------------------------------------------------------------------
+
+USAJOBS_URL = "https://data.usajobs.gov/api/search"
+_PAY_INTERVALS = {"PH": "per hour", "PA": "per year", "PD": "per day", "PW": "per week", "BW": "every two weeks",
+                  "PM": "per month"}
+
+
+def _usajobs_pay(desc: dict[str, Any]) -> tuple[str, str]:
+    for rem in desc.get("PositionRemuneration") or []:
+        code = (rem.get("RateIntervalCode") or "").upper()
+        if code == "WC":
+            return "unpaid", "Without compensation"
+        try:
+            lo = float(rem.get("MinimumRange") or 0)
+            hi = float(rem.get("MaximumRange") or 0)
+        except (TypeError, ValueError):
+            continue
+        if lo or hi:
+            unit = _PAY_INTERVALS.get(code, (rem.get("Description") or "").lower())
+            fmt = "${:,.2f}" if code == "PH" else "${:,.0f}"
+            rng = fmt.format(lo) if not hi or hi == lo else f"{fmt.format(lo)}–{fmt.format(hi)}"
+            return "paid", f"{rng} {unit}".strip()
+    return "unknown", ""
+
+
+def parse_usajobs(data: dict[str, Any], require_intern_title: bool = False) -> list[Posting]:
+    out = []
+    items = ((data.get("SearchResult") or {}).get("SearchResultItems")) or []
+    for item in items:
+        d = item.get("MatchedObjectDescriptor") or {}
+        title = d.get("PositionTitle") or ""
+        if require_intern_title and not (_INTERN_RX.search(title) or re.search(r"\bstudent\b", title, re.I)):
+            continue
+        details = ((d.get("UserArea") or {}).get("Details")) or {}
+        duties = details.get("MajorDuties") or []
+        if isinstance(duties, str):
+            duties = [duties]
+        description = "\n\n".join(x for x in [
+            details.get("JobSummary") or "",
+            "\n".join(f"- {html_to_text(x)}" for x in duties if x),
+            d.get("QualificationSummary") or "",
+            details.get("Education") or "",
+            details.get("Requirements") or "",
+        ] if x)
+        locations = [loc.get("LocationName", "") for loc in d.get("PositionLocation") or [] if isinstance(loc, dict)]
+        if not locations and d.get("PositionLocationDisplay"):
+            locations = [d["PositionLocationDisplay"]]
+        if details.get("RemoteIndicator") is True:
+            locations.append("Remote")
+        job_cats = ", ".join(c.get("Name", "") for c in d.get("JobCategory") or [] if isinstance(c, dict))
+        apply = d.get("ApplyURI") or []
+        p = make_posting(
+            id=f"usajobs:{d.get('PositionID') or item.get('MatchedObjectId')}",
+            source="USAJOBS",
+            company=d.get("OrganizationName") or d.get("DepartmentName") or "",
+            title=title,
+            url=d.get("PositionURI") or (apply[0] if apply else ""),
+            description=html_to_text(description),
+            locations=locations,
+            date_posted=d.get("PublicationStartDate"),
+            source_category=job_cats,
+            default_category="Government & Policy",  # it's a government job, after all
+            pay=_usajobs_pay(d),
+            deadline=d.get("ApplicationCloseDate"),
+        )
+        if p:
+            out.append(p)
+    return out
+
+
+async def fetch_usajobs(client: httpx.AsyncClient, settings: Callable[[str], str | None]) -> tuple[list[Posting], dict]:
+    headers = {"Authorization-Key": settings("usajobs_api_key") or "", "User-Agent": settings("usajobs_email") or "",
+               "Host": "data.usajobs.gov"}
+    queries = [
+        ({"HiringPath": "student", "ResultsPerPage": 500, "Page": 1}, False),
+        ({"Keyword": "intern", "ResultsPerPage": 500, "Page": 1}, True),
+    ]
+    postings: dict[str, Posting] = {}
+    detail = {}
+    for params, require_title in queries:
+        resp = await client.get(USAJOBS_URL, params=params, headers=headers)
+        if resp.status_code in (401, 403):
+            raise RuntimeError("USAJOBS rejected the API key or email. Check them in Settings.")
+        resp.raise_for_status()
+        found = parse_usajobs(resp.json(), require_intern_title=require_title)
+        detail[str(params)] = len(found)
+        for p in found:
+            postings.setdefault(p.id, p)
+    return list(postings.values()), {"queries": detail}
+
+
+# ---------------------------------------------------------------------------
+# Adzuna
+# ---------------------------------------------------------------------------
+
+ADZUNA_URL = "https://api.adzuna.com/v1/api/jobs/us/search/{page}"
+ADZUNA_CATEGORIES: dict[str, str | None] = {
+    "legal-jobs": "Legal",
+    "accounting-finance-jobs": "Finance & Accounting",
+    "consultancy-jobs": "Consulting & Business",
+    "pr-advertising-marketing-jobs": "Marketing & Communications",
+    "creative-design-jobs": "Media & Writing",
+    "charity-voluntary-jobs": "Nonprofit & Advocacy",
+    "teaching-jobs": "Education & Research",
+    "hr-jobs": "Consulting & Business",
+    "graduate-jobs": None,
+}
+ADZUNA_PAGES = 2
+
+
+def parse_adzuna(data: dict[str, Any], tag: str | None = None) -> list[Posting]:
+    out = []
+    for job in data.get("results") or []:
+        title = html_to_text(job.get("title") or "")
+        if not _INTERN_RX.search(title):
+            continue
+        cat = job.get("category") or {}
+        pay = ("unknown", "")
+        predicted = str(job.get("salary_is_predicted", "1")) in {"1", "true", "True"}
+        if job.get("salary_min") and not predicted:
+            lo, hi = float(job["salary_min"]), float(job.get("salary_max") or job["salary_min"])
+            unit = "per hour" if hi < 200 else "per year"
+            rng = f"${lo:,.0f}" if hi == lo else f"${lo:,.0f}–${hi:,.0f}"
+            pay = ("paid", f"{rng} {unit}")
+        p = make_posting(
+            id=f"adzuna:{job.get('id')}",
+            source="Adzuna",
+            company=(job.get("company") or {}).get("display_name", ""),
+            title=title,
+            url=job.get("redirect_url") or "",
+            description=html_to_text(job.get("description") or ""),
+            locations=[(job.get("location") or {}).get("display_name", "")],
+            date_posted=job.get("created"),
+            source_category=cat.get("label", ""),
+            hint_category=ADZUNA_CATEGORIES.get(cat.get("tag") or tag or ""),
+            pay=pay,
+        )
+        if p:
+            out.append(p)
+    return out
+
+
+async def fetch_adzuna(client: httpx.AsyncClient, settings: Callable[[str], str | None]) -> tuple[list[Posting], dict]:
+    creds = {"app_id": settings("adzuna_app_id") or "", "app_key": settings("adzuna_app_key") or ""}
+    detail: dict[str, Any] = {}
+
+    async def query(tag: str) -> list[Posting]:
+        found: list[Posting] = []
+        for page in range(1, ADZUNA_PAGES + 1):
+            params = {**creds, "results_per_page": 50, "what": "intern", "category": tag, "max_days_old": 90,
+                      "sort_by": "date", "content-type": "application/json"}
+            resp = await client.get(ADZUNA_URL.format(page=page), params=params)
+            if resp.status_code in (401, 403):
+                raise RuntimeError("Adzuna rejected the app ID or key. Check them in Settings.")
+            resp.raise_for_status()
+            data = resp.json()
+            found.extend(parse_adzuna(data, tag))
+            if len(data.get("results") or []) < 50:
+                break
+        detail[tag] = len(found)
+        return found
+
+    results = await asyncio.gather(*(query(t) for t in ADZUNA_CATEGORIES), return_exceptions=True)
+    errors = [r for r in results if isinstance(r, BaseException)]
+    if len(errors) == len(results):
+        raise RuntimeError(str(errors[0]))
+    postings: dict[str, Posting] = {}
+    for res in results:
+        if not isinstance(res, BaseException):
+            for p in res:
+                postings.setdefault(p.id, p)
+    return list(postings.values()), {"queries": detail, "partial_errors": len(errors)}
+
+
+# ---------------------------------------------------------------------------
+# Company job boards (Greenhouse / Lever / Ashby)
 # ---------------------------------------------------------------------------
 
 _BOARD_URL_PATTERNS = (
@@ -158,7 +466,7 @@ _BOARD_URL_PATTERNS = (
 
 
 def parse_board_spec(spec: str) -> tuple[str, str] | None:
-    """Accept "greenhouse:stripe", "lever:palantir", "ashby:ramp" or a board URL."""
+    """Accept "greenhouse:nytimes", "lever:acme", "ashby:acme" or a board URL."""
     spec = spec.strip()
     if not spec:
         return None
@@ -175,31 +483,25 @@ def parse_board_spec(spec: str) -> tuple[str, str] | None:
     return None
 
 
-def _is_internship(title: str, extra: str = "") -> bool:
-    return bool(_INTERN_RX.search(title) or _INTERN_RX.search(extra))
+def _board_posting(employment: str = "", **kw: Any) -> Posting | None:
+    if not _INTERN_RX.search(kw["title"]) and not _INTERN_RX.search(employment):
+        return None
+    return make_posting(default_category="Consulting & Business", **kw)
 
 
 def parse_greenhouse_board(slug: str, data: dict[str, Any]) -> list[Posting]:
     out = []
     for job in data.get("jobs", []):
-        title = job.get("title") or ""
-        if not _is_internship(title):
-            continue
         loc = (job.get("location") or {}).get("name") or ""
-        out.append(
-            Posting(
-                id=f"greenhouse:{slug}:{job.get('id')}",
-                source="Greenhouse",
-                company=job.get("company_name") or slug.replace("-", " ").title(),
-                title=title,
-                category=category_from_title(title),
-                locations=[p.strip() for p in re.split(r";|\|", loc) if p.strip()],
-                url=job.get("absolute_url") or "",
-                terms=terms_from_title(title),
-                date_posted=_ts(job.get("first_published") or job.get("updated_at")),
-                description=html_to_text(job.get("content") or ""),
-            )
+        p = _board_posting(
+            id=f"greenhouse:{slug}:{job.get('id')}", source="Greenhouse",
+            company=job.get("company_name") or slug.replace("-", " ").title(), title=job.get("title") or "",
+            url=job.get("absolute_url") or "", description=html_to_text(job.get("content") or ""),
+            locations=[x.strip() for x in re.split(r";|\|", loc) if x.strip()],
+            date_posted=job.get("first_published") or job.get("updated_at"),
         )
+        if p:
+            out.append(p)
     return out
 
 
@@ -215,55 +517,36 @@ def _lever_description(job: dict[str, Any]) -> str:
 def parse_lever_board(slug: str, data: list[dict[str, Any]]) -> list[Posting]:
     out = []
     for job in data:
-        title = job.get("text") or ""
         cats = job.get("categories") or {}
-        if not _is_internship(title, cats.get("commitment") or ""):
-            continue
-        locs = cats.get("allLocations") or ([cats["location"]] if cats.get("location") else [])
-        out.append(
-            Posting(
-                id=f"lever:{slug}:{job.get('id')}",
-                source="Lever",
-                company=slug.replace("-", " ").title(),
-                title=title,
-                category=category_from_title(title),
-                locations=locs,
-                url=job.get("hostedUrl") or "",
-                terms=terms_from_title(title),
-                date_posted=_ts(job.get("createdAt")),
-                description=_lever_description(job),
-            )
+        p = _board_posting(
+            id=f"lever:{slug}:{job.get('id')}", source="Lever", company=slug.replace("-", " ").title(),
+            title=job.get("text") or "", url=job.get("hostedUrl") or "", description=_lever_description(job),
+            locations=cats.get("allLocations") or ([cats["location"]] if cats.get("location") else []),
+            date_posted=job.get("createdAt"), employment=cats.get("commitment") or "",
+            source_category=cats.get("team") or "",
         )
+        if p:
+            out.append(p)
     return out
 
 
 def parse_ashby_board(slug: str, data: dict[str, Any]) -> list[Posting]:
     out = []
     for job in data.get("jobs", []):
-        title = job.get("title") or ""
-        if not _is_internship(title, job.get("employmentType") or ""):
-            continue
         if job.get("isListed") is False:
             continue
-        locs = [job.get("location") or ""] + [
-            s.get("location") or "" for s in job.get("secondaryLocations") or []
-        ]
+        locs = [job.get("location") or ""] + [s.get("location") or "" for s in job.get("secondaryLocations") or []]
         if job.get("isRemote"):
             locs.append("Remote")
-        out.append(
-            Posting(
-                id=f"ashby:{slug}:{job.get('id')}",
-                source="Ashby",
-                company=slug.replace("-", " ").title(),
-                title=title,
-                category=category_from_title(title),
-                locations=[loc for loc in locs if loc],
-                url=job.get("jobUrl") or "",
-                terms=terms_from_title(title),
-                date_posted=_ts(job.get("publishedAt")),
-                description=job.get("descriptionPlain") or html_to_text(job.get("descriptionHtml") or ""),
-            )
+        p = _board_posting(
+            id=f"ashby:{slug}:{job.get('id')}", source="Ashby", company=slug.replace("-", " ").title(),
+            title=job.get("title") or "", url=job.get("jobUrl") or "",
+            description=job.get("descriptionPlain") or html_to_text(job.get("descriptionHtml") or ""),
+            locations=locs, date_posted=job.get("publishedAt"), employment=job.get("employmentType") or "",
+            source_category=job.get("department") or "",
         )
+        if p:
+            out.append(p)
     return out
 
 
@@ -283,17 +566,13 @@ def parse_board(kind: str, slug: str, data: Any) -> list[Posting]:
     )
 
 
-# ---------------------------------------------------------------------------
-# Description lookup for individual posting URLs
-# ---------------------------------------------------------------------------
-
 _GH_JOB = re.compile(r"greenhouse\.io/([\w.-]+)/jobs/(\d+)", re.I)
 _LEVER_JOB = re.compile(r"jobs\.(?:eu\.)?lever\.co/([\w.-]+)/([0-9a-f-]{36})", re.I)
 _ASHBY_JOB = re.compile(r"jobs\.ashbyhq\.com/([\w.%-]+)/([0-9a-f-]{36})", re.I)
 
 
 def detail_source(url: str) -> tuple[str, str, str] | None:
-    """(kind, board slug, job id) if we know how to fetch this posting's description."""
+    """(kind, board slug, job id) if we know how to fetch this posting's full description."""
     for kind, rx in (("greenhouse", _GH_JOB), ("lever", _LEVER_JOB), ("ashby", _ASHBY_JOB)):
         m = rx.search(url or "")
         if m and m.group(1).lower() not in {"embed"}:
@@ -302,34 +581,49 @@ def detail_source(url: str) -> tuple[str, str, str] | None:
 
 
 # ---------------------------------------------------------------------------
-# Store with on-disk cache
+# Registry and store
 # ---------------------------------------------------------------------------
 
+Fetcher = Callable[[httpx.AsyncClient, Callable[[str], "str | None"]], Awaitable[tuple[list[Posting], dict]]]
 
-def default_cache_dir() -> Path:
-    env = os.environ.get("INTERNMATCH_CACHE_DIR")
-    if env:
-        return Path(env)
-    base = os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache"
-    return Path(base) / "internmatch"
+
+class SourceInfo:
+    def __init__(self, name: str, label: str, fetch: Fetcher, needs: tuple[str, ...], signup: str, about: str):
+        self.name, self.label, self.fetch, self.needs, self.signup, self.about = name, label, fetch, needs, signup, about
+
+
+SOURCES: dict[str, SourceInfo] = {
+    "themuse": SourceInfo("themuse", "The Muse", fetch_muse, (), "https://www.themuse.com/developers/api/v2",
+                          "Internships in legal, finance, business, marketing, media, writing and education. "
+                          "No key needed."),
+    "usajobs": SourceInfo("usajobs", "USAJOBS", fetch_usajobs, ("usajobs_api_key", "usajobs_email"),
+                          "https://developer.usajobs.gov/apirequest/",
+                          "Federal internships and Pathways student jobs (Justice, State, Library of Congress, "
+                          "Smithsonian, National Archives and more). Free key."),
+    "adzuna": SourceInfo("adzuna", "Adzuna", fetch_adzuna, ("adzuna_app_id", "adzuna_app_key"),
+                         "https://developer.adzuna.com/signup",
+                         "Large job aggregator: legal, finance, consulting, marketing, creative, teaching and "
+                         "nonprofit internships from across the web. Free key."),
+}
 
 
 class ListingStore:
-    """Fetches and caches postings. Safe to share across requests."""
+    """Fetches, filters and caches postings from every configured source. Safe to share across requests."""
 
     def __init__(
         self,
         cache_dir: Path | None = None,
         ttl_hours: float = 6,
         transport: httpx.AsyncBaseTransport | None = None,
+        settings: Callable[[str], str | None] = config.get,
     ) -> None:
-        self.cache_dir = Path(cache_dir) if cache_dir else default_cache_dir()
+        self.cache_dir = Path(cache_dir) if cache_dir else config.cache_dir()
         self.ttl = ttl_hours * 3600
         self._transport = transport
+        self._settings = settings
         self._postings: list[Posting] | None = None
         self._fetched_at: float | None = None
-        self._source_url: str | None = None
-        self._last_error: str | None = None
+        self._status: dict[str, dict[str, Any]] = {}
         self._lock = asyncio.Lock()
         self._descriptions: dict[str, str] | None = None
         self._board_cache: dict[str, tuple[float, list[Posting]]] = {}
@@ -343,13 +637,8 @@ class ListingStore:
             transport=self._transport,
         )
 
-    @property
-    def _listings_file(self) -> Path:
-        return self.cache_dir / "simplify_postings.json"
-
-    @property
-    def _descriptions_file(self) -> Path:
-        return self.cache_dir / "descriptions.json"
+    def _cache_file(self, name: str) -> Path:
+        return self.cache_dir / f"source_{name}.json"
 
     def _write_json(self, path: Path, payload: Any) -> None:
         try:
@@ -360,70 +649,88 @@ class ListingStore:
         except OSError as exc:  # a read-only home dir shouldn't break the app
             log.warning("could not write cache %s: %s", path, exc)
 
-    def _load_cached_listings(self) -> tuple[float, str, list[Posting]] | None:
+    def _read_cache(self, name: str) -> tuple[float, list[Posting]] | None:
         try:
-            payload = json.loads(self._listings_file.read_text())
-            postings = [Posting.model_validate(p) for p in payload["postings"]]
-            return payload["fetched_at"], payload.get("source_url", ""), postings
+            payload = json.loads(self._cache_file(name).read_text())
+            return payload["fetched_at"], [Posting.model_validate(p) for p in payload["postings"]]
         except (OSError, ValueError, KeyError, TypeError):
             return None
 
-    # -- Simplify feed ----------------------------------------------------
+    def enabled(self, name: str) -> bool:
+        return all(self._settings(k) for k in SOURCES[name].needs)
+
+    def invalidate(self) -> None:
+        """Forget the in-memory list (e.g. after API keys change) so the next request re-reads sources."""
+        self._postings = None
+
+    # -- sources ------------------------------------------------------------
+    async def fetch_source(self, name: str) -> tuple[list[Posting], dict]:
+        """Fetch one source live, bypassing the cache."""
+        async with self._client(timeout=45) as client:
+            return await SOURCES[name].fetch(client, self._settings)
+
+    async def _load_source(self, name: str, force: bool) -> list[Posting]:
+        now = time.time()
+        cached = self._read_cache(name)
+        if cached and not force and now - cached[0] < self.ttl:
+            self._status[name] = {"count": len(cached[1]), "fetched_at": cached[0], "error": None}
+            return cached[1]
+        try:
+            postings, detail = await self.fetch_source(name)
+        except Exception as exc:
+            msg = str(exc) or type(exc).__name__
+            log.warning("%s refresh failed: %s", name, msg)
+            if cached:
+                self._status[name] = {"count": len(cached[1]), "fetched_at": cached[0],
+                                      "error": f"Using saved results; refresh failed: {msg}"}
+                return cached[1]
+            self._status[name] = {"count": 0, "fetched_at": None, "error": msg}
+            return []
+        self._write_json(self._cache_file(name), {"fetched_at": now,
+                                                  "postings": [p.model_dump(mode="json") for p in postings]})
+        self._status[name] = {"count": len(postings), "fetched_at": now, "error": None, "detail": detail}
+        return postings
+
     async def get_postings(self, force: bool = False) -> list[Posting]:
         async with self._lock:
             now = time.time()
             if not force and self._postings is not None and now - (self._fetched_at or 0) < self.ttl:
                 return self._postings
-            cached = None if force else self._load_cached_listings()
-            if cached and now - cached[0] < self.ttl:
-                self._fetched_at, self._source_url, self._postings = cached
-                return self._postings
-            try:
-                url, postings = await self._download_simplify()
-            except Exception as exc:
-                self._last_error = f"{type(exc).__name__}: {exc}"
-                log.warning("listing refresh failed: %s", self._last_error)
-                stale = cached or self._load_cached_listings()
-                if self._postings is not None:
-                    return self._postings
-                if stale:
-                    self._fetched_at, self._source_url, self._postings = stale
-                    return self._postings
-                raise RuntimeError(f"Could not download internship listings ({self._last_error}).") from exc
-            self._postings, self._fetched_at, self._source_url, self._last_error = postings, now, url, None
-            self._write_json(
-                self._listings_file,
-                {
-                    "fetched_at": now,
-                    "source_url": url,
-                    "postings": [p.model_dump(mode="json") for p in postings],
-                },
-            )
+            names = [n for n in SOURCES if self.enabled(n)]
+            for n in SOURCES:
+                if n not in names:
+                    self._status.pop(n, None)
+            results = await asyncio.gather(*(self._load_source(n, force) for n in names))
+            postings = [p for res in results for p in res]
+            if not postings:
+                errors = "; ".join(f"{SOURCES[n].label}: {self._status[n]['error']}" for n in names
+                                   if self._status.get(n, {}).get("error"))
+                raise RuntimeError(f"Could not load any internship listings ({errors or 'no results'}).")
+            self._postings, self._fetched_at = postings, now
             return postings
 
-    async def _download_simplify(self) -> tuple[str, list[Posting]]:
-        errors = []
-        async with self._client(timeout=60) as client:
-            for url in simplify_urls():
-                try:
-                    resp = await client.get(url)
-                    resp.raise_for_status()
-                    postings = parse_simplify(resp.json())
-                    if postings:
-                        return url, postings
-                    errors.append(f"{url}: no active postings")
-                except (httpx.HTTPError, ValueError) as exc:
-                    errors.append(f"{url}: {exc}")
-        raise RuntimeError("; ".join(errors))
-
     def status(self) -> dict[str, Any]:
+        sources = {}
+        for name, info in SOURCES.items():
+            st = self._status.get(name, {})
+            sources[name] = {
+                "label": info.label,
+                "about": info.about,
+                "signup": info.signup,
+                "needs": list(info.needs),
+                "enabled": self.enabled(name),
+                "count": st.get("count", 0),
+                "fetched_at": datetime.fromtimestamp(st["fetched_at"], tz=timezone.utc).isoformat()
+                if st.get("fetched_at") else None,
+                "error": st.get("error"),
+            }
+        fetched = [s["fetched_at"] for s in sources.values() if s["fetched_at"]]
+        errors = [f"{s['label']}: {s['error']}" for s in sources.values() if s["enabled"] and s["error"]]
         return {
             "count": len(self._postings or []),
-            "fetched_at": datetime.fromtimestamp(self._fetched_at, tz=timezone.utc).isoformat()
-            if self._fetched_at
-            else None,
-            "source_url": self._source_url,
-            "error": self._last_error,
+            "fetched_at": min(fetched) if fetched else None,
+            "sources": sources,
+            "error": "; ".join(errors) or None,
         }
 
     # -- company boards ---------------------------------------------------
@@ -433,7 +740,7 @@ class ListingStore:
             p = parse_board_spec(spec)
             if p is None:
                 if spec.strip():
-                    errors.append(f"Couldn't understand board '{spec}'. Use e.g. greenhouse:stripe or lever:palantir.")
+                    errors.append(f"Couldn't understand board '{spec}'. Use e.g. greenhouse:nytimes or lever:acme.")
                 continue
             parsed.append(p)
         if not parsed:
@@ -463,6 +770,10 @@ class ListingStore:
         return out, errors
 
     # -- description enrichment -------------------------------------------
+    @property
+    def _descriptions_file(self) -> Path:
+        return self.cache_dir / "descriptions.json"
+
     def _load_descriptions(self) -> dict[str, str]:
         if self._descriptions is None:
             try:
@@ -490,7 +801,7 @@ class ListingStore:
             return filled
 
         sem = asyncio.Semaphore(concurrency)
-        ashby_boards: dict[str, asyncio.Task[dict[str, Any]]] = {}
+        ashby_boards: dict[str, asyncio.Future[dict[str, Any]]] = {}
 
         async def ashby_board(client: httpx.AsyncClient, slug: str) -> dict[str, Any]:
             resp = await client.get(board_api_url("ashby", slug))
@@ -501,7 +812,8 @@ class ListingStore:
             kind, slug, job_id = src
             async with sem:
                 if kind == "greenhouse":
-                    host = "boards-api.eu.greenhouse.io" if ".eu.greenhouse.io" in posting.url else "boards-api.greenhouse.io"
+                    eu = ".eu.greenhouse.io" in posting.url
+                    host = "boards-api.eu.greenhouse.io" if eu else "boards-api.greenhouse.io"
                     resp = await client.get(f"https://{host}/v1/boards/{slug}/jobs/{job_id}")
                     resp.raise_for_status()
                     return html_to_text(resp.json().get("content") or "")
@@ -543,32 +855,34 @@ def _term_key(term: str) -> tuple[int, int]:
     return (int(year) if year.isdigit() else 0, _SEASON_ORDER.get(season, 9))
 
 
+def _started(term: str, now: datetime) -> bool:
+    year, season = _term_key(term)
+    if not year or year < now.year:
+        return True
+    # "Winter <this year>" is used for both January and December starts, so keep it all year.
+    start_month = {1: 2, 2: 6, 3: 9}.get(season)
+    return year == now.year and start_month is not None and now.month >= start_month
+
+
+def upcoming_terms(now: datetime, n: int = 4) -> list[str]:
+    """The next few internship terms that haven't started yet, in order."""
+    terms = [f"{season} {y}" for y in (now.year, now.year + 1, now.year + 2) for season in ("Spring", "Summer", "Fall")]
+    return [t for t in terms if not _started(t, now)][:n]
+
+
 def term_options(postings: Iterable[Posting], now: datetime | None = None) -> list[dict[str, Any]]:
-    """Terms that still make sense to apply for, in calendar order, with posting counts."""
+    """Upcoming terms (always shown) plus any other not-yet-started terms postings mention, with counts."""
     now = now or datetime.now(timezone.utc)
-    counts: dict[str, int] = {}
+    counts: dict[str, int] = {t: 0 for t in upcoming_terms(now)}
     for p in postings:
         for t in p.terms:
-            counts[t] = counts.get(t, 0) + 1
-    out = []
-    for term, n in counts.items():
-        year, season = _term_key(term)
-        if not year:
-            continue
-        # Drop terms that have clearly started. "Winter <this year>" is used for both Jan and Dec
-        # starts, so keep it.
-        if year < now.year:
-            continue
-        if year == now.year and ((season in (1, 2) and now.month >= 6) or (season == 3 and now.month >= 9)):
-            continue
-        out.append({"term": term, "count": n})
-    return sorted(out, key=lambda d: _term_key(d["term"]))
+            if not _started(t, now):
+                counts[t] = counts.get(t, 0) + 1
+    return sorted(({"term": t, "count": n} for t, n in counts.items()), key=lambda d: _term_key(d["term"]))
 
 
 def default_terms(options: list[dict[str, Any]], now: datetime | None = None) -> list[str]:
-    """Next summer if it has postings (that's when most students intern), else the busiest term."""
+    """Next summer: that's when most students intern."""
     now = now or datetime.now(timezone.utc)
     summer = f"Summer {now.year + 1 if now.month >= 7 else now.year}"
-    if any(o["term"] == summer for o in options):
-        return [summer]
-    return [max(options, key=lambda o: o["count"])["term"]] if options else []
+    return [summer] if any(o["term"] == summer for o in options) else []

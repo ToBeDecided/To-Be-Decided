@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Internship Matcher</title>
-  <meta name="description" content="Rate your resume and find the internships you're most likely to get interviews for.">
+  <meta name="description" content="Rate your resume and find pre-law, business and humanities internships you're likely to get interviews for.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%234f46e5'/%3E%3Cpath d='M9 17l4.5 4.5L23 11' stroke='white' stroke-width='3.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -15,10 +15,12 @@
         <svg viewBox="0 0 32 32"><rect width="32" height="32" rx="8"/><path d="M9 17l4.5 4.5L23 11"/></svg>
       </span>
       <span>Internship Matcher</span>
+      <span class="brand-sub">Pre-Law · Business · Humanities</span>
     </div>
     <div class="topbar-right">
       <span class="listing-status" id="listingStatus"><span class="dot pending"></span>Loading listings…</span>
       <button class="btn ghost small" id="refreshBtn" type="button" title="Download the latest postings">Refresh</button>
+      <button class="btn ghost small" id="settingsBtn" type="button">Sources &amp; keys</button>
     </div>
   </header>
 
@@ -28,10 +30,10 @@
         <section class="form-section">
           <h2><span class="step">1</span>Your resume</h2>
           <label class="dropzone" id="dropzone">
-            <input type="file" id="resumeFile" accept=".pdf,.docx,.txt,.md">
+            <input type="file" id="resumeFile" accept=".pdf,.docx,.doc,.rtf,.odt,.pages,.txt,.md">
             <svg class="dz-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0l-4 4m4-4l4 4M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
             <span class="dz-text" id="dzText"><strong>Drop your resume here</strong> or click to browse</span>
-            <span class="dz-hint">PDF, DOCX or TXT</span>
+            <span class="dz-hint">PDF or Word works best. Using Pages? File › Export To › PDF.</span>
           </label>
           <details class="paste">
             <summary>…or paste the text instead</summary>
@@ -51,10 +53,11 @@
               <select id="degree">
                 <option value="">From resume</option>
                 <option value="bachelor">Bachelor's</option>
-                <option value="master">Master's</option>
-                <option value="phd">PhD</option>
-                <option value="mba">MBA</option>
                 <option value="associate">Associate's</option>
+                <option value="master">Master's</option>
+                <option value="jd">J.D. (law student)</option>
+                <option value="mba">MBA</option>
+                <option value="phd">PhD</option>
                 <option value="high_school">High school</option>
               </select>
             </label>
@@ -76,16 +79,24 @@
         <section class="form-section">
           <h2><span class="step">3</span>What you're looking for</h2>
           <div class="field">
+            <span>Tracks <em>(none = all three)</em></span>
+            <div class="track-picker" id="trackChips"></div>
+          </div>
+          <details class="areas">
+            <summary>Narrow to specific areas</summary>
+            <div class="chips-input" id="categoryChips"></div>
+          </details>
+          <div class="field">
             <span>Term</span>
             <div class="chips-input" id="termChips"><span class="muted small">Loading…</span></div>
           </div>
-          <div class="field">
-            <span>Role types <em>(none = all)</em></span>
-            <div class="chips-input" id="categoryChips"></div>
+          <div class="checks">
+            <label><input type="checkbox" id="includeUnknownTerms" checked> Include postings that don't say which term</label>
+            <label><input type="checkbox" id="paidOnly"> Paid internships only</label>
           </div>
           <label class="field">
             <span>Preferred locations</span>
-            <input id="locations" type="text" placeholder="e.g. NYC, Bay Area, Seattle, TX">
+            <input id="locations" type="text" placeholder="e.g. DC, NYC, Chicago, Boston, CA">
           </label>
           <div class="checks">
             <label><input type="checkbox" id="remoteOk" checked> Remote counts as a match</label>
@@ -107,15 +118,15 @@
           <summary>Advanced options</summary>
           <label class="field">
             <span>Skills not on your resume</span>
-            <input id="extraSkills" type="text" placeholder="e.g. Go, Kubernetes">
+            <input id="extraSkills" type="text" placeholder="e.g. Westlaw, Spanish, Canva">
           </label>
           <label class="field">
-            <span>Skip these companies</span>
+            <span>Skip these employers</span>
             <input id="excludeCompanies" type="text" placeholder="e.g. Acme, Initech">
           </label>
           <label class="field">
-            <span>Also search company job boards</span>
-            <input id="boards" type="text" placeholder="e.g. greenhouse:stripe, lever:palantir, ashby:ramp">
+            <span>Also search employer job boards</span>
+            <input id="boards" type="text" placeholder="e.g. greenhouse:nytimes, lever:acme">
           </label>
           <label class="check-line"><input type="checkbox" id="enrich" checked> Fetch full job descriptions for top matches (sharper matching)</label>
         </details>
@@ -128,15 +139,32 @@
     <section class="results" id="results" aria-live="polite">
       <div class="empty-state">
         <h1>Find the internships you'll actually hear back from</h1>
-        <p class="lead">Upload your resume and we'll grade it, show you exactly what to fix, and rank thousands of live internship postings by your odds of landing an interview.</p>
+        <p class="lead">Built for pre-law, business and humanities students. Upload your resume and we'll grade it, show you exactly what to fix, and rank live internships by your odds of landing an interview.</p>
         <ol class="how">
-          <li><strong>Resume score.</strong> A transparent rubric covering impact, experience, skills, academics and format, with specific fixes.</li>
-          <li><strong>Fit.</strong> Each posting is matched against your skills using its title, category and (when available) the full job description.</li>
-          <li><strong>Odds.</strong> Fit, your competitiveness against the company's selectivity, and how fresh the posting is. Results are split into <span class="tier tier-likely">Likely</span> <span class="tier tier-target">Target</span> <span class="tier tier-reach">Reach</span>.</li>
+          <li><strong>Resume score.</strong> A transparent rubric covering writing and impact, experience and involvement (leadership, mock trial, the campus paper, research and volunteering all count), skills and languages, academics, and format.</li>
+          <li><strong>Fit.</strong> Postings in law and policy, finance and consulting, marketing and communications, media and publishing, museums and the arts, education and nonprofits are matched against your background.</li>
+          <li><strong>Odds.</strong> Fit, your competitiveness against the employer's selectivity, and how fresh the posting is. Results are split into <span class="tier tier-likely">Likely</span> <span class="tier tier-target">Target</span> <span class="tier tier-reach">Reach</span>.</li>
+          <li><strong>Found one elsewhere?</strong> Use <em>Check a posting</em> to score any listing from Handshake, LinkedIn or an employer's website.</li>
         </ol>
+        <p class="small muted" id="sourcesHint"></p>
       </div>
     </section>
   </main>
+
+  <dialog id="settingsDialog" class="dialog">
+    <form method="dialog" id="settingsForm">
+      <header class="dialog-head">
+        <h2>Internship sources &amp; keys</h2>
+        <button class="icon-btn" value="cancel" aria-label="Close">✕</button>
+      </header>
+      <div id="settingsBody" class="dialog-body"></div>
+      <footer class="dialog-foot">
+        <span class="small muted" id="settingsNote"></span>
+        <button class="btn ghost" value="cancel">Cancel</button>
+        <button class="btn primary" id="saveSettings" value="default">Save</button>
+      </footer>
+    </form>
+  </dialog>
 
   <script src="app.js"></script>
 </body>

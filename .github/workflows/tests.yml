@@ -6,10 +6,14 @@ on:
 
 jobs:
   pytest:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ["3.10", "3.12"]
+        include:
+          - { os: ubuntu-latest, python-version: "3.10" }
+          - { os: ubuntu-latest, python-version: "3.12" }
+          - { os: macos-latest, python-version: "3.12" }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -17,3 +21,33 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e ".[dev]"
       - run: pytest -q
+
+  mac-launcher:
+    # What a Mac user does: run start.command with whatever Python the machine has.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: First run of start.command (sets up .venv, runs the self-check)
+        run: ./start.command --check
+      - name: Second run reuses the environment
+        run: ./start.command --check
+      - name: Serve and smoke-test the web app
+        run: |
+          .venv/bin/internmatch serve --no-browser --port 8123 > server.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8123/api/health && break; sleep 1; done
+          curl -sf http://127.0.0.1:8123/ | grep -q "Pre-Law"
+          test "$(curl -s -o /dev/null -w "%{http_code}" -H "Host: evil.example" http://127.0.0.1:8123/api/health)" = 403
+          .venv/bin/internmatch serve --no-browser --port 8123 | grep -q "already running"
+      - name: Read a Word resume converted with textutil
+        run: |
+          textutil -convert doc -output /tmp/resume.doc tests/fixtures/prelaw_resume.txt
+          .venv/bin/python -c "from internmatch.resume import extract_text; t, _ = extract_text('resume.doc', open('/tmp/resume.doc','rb').read()); assert 'Maya Thompson' in t, t[:200]; print('ok')"
+      - name: Live job sources (informational)
+        continue-on-error: true
+        run: |
+          .venv/bin/internmatch doctor --verbose
+          curl -s http://127.0.0.1:8123/api/meta | .venv/bin/python -c "import json,sys; d=json.load(sys.stdin); print({k: (v['count'], v['error']) for k, v in d['listings']['sources'].items()})"
+          .venv/bin/internmatch analyze tests/fixtures/prelaw_resume.txt --no-enrich --top 10
+      - name: Server log
+        if: always()
+        run: cat server.log || true

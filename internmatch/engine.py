@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from .matcher import build_candidate, rank, recommend, summarize_profile
-from .models import AnalysisResult, Posting, Profile
+from .matcher import build_candidate, check_posting, rank, recommend, summarize_profile
+from .models import AnalysisResult, Match, Posting, Profile, ResumeReport
 from .resume import parse_resume, score_resume
-from .sources import ListingStore, detail_source
+from .skills import classify
+from .sources import ListingStore, detail_source, detect_pay, terms_from_text
 
 
 async def analyze(
@@ -39,7 +40,7 @@ async def analyze(
 
     enriched = 0
     if enrich and matches:
-        # Pull real job descriptions for the most promising roles, then re-score with them.
+        # Pull real job descriptions for the most promising roles that lack one, then re-score with them.
         candidates = [m.posting for m in matches[: enrich_limit * 3] if not m.posting.description
                       and detail_source(m.posting.url)][:enrich_limit]
         if candidates:
@@ -62,9 +63,44 @@ async def analyze(
             "target": tiers["Target"],
             "reach": tiers["Reach"],
             "descriptions_fetched": enriched,
-            **{f"excluded_{k}": v for k, v in excluded.items()},
+            **{f"excluded_{k.replace(' ', '_')}": v for k, v in excluded.items()},
             "board_errors": "; ".join(board_errors) or None,
             "listings_updated": store.status().get("fetched_at"),
         },
         resume_text=resume_text,
     )
+
+
+def posting_from_text(title: str, company: str = "", description: str = "", location: str = "",
+                      url: str = "") -> Posting:
+    """Build a Posting from details the user pasted in (from Handshake, LinkedIn, a firm's site...)."""
+    category, how = classify(title)
+    if category is None:
+        category = "Consulting & Business"
+    pay, pay_detail = detect_pay(f"{title}\n{description}")
+    return Posting(
+        id="pasted",
+        source="Pasted",
+        company=company.strip() or "This employer",
+        title=title.strip(),
+        category=category,
+        locations=[x.strip() for x in location.split(";") if x.strip()] if location else [],
+        url=url.strip(),
+        terms=terms_from_text(title, description),
+        description=description.strip(),
+        pay=pay,  # type: ignore[arg-type]
+        pay_detail=pay_detail,
+        source_category="off-focus" if how == "off" else "",
+    )
+
+
+def check(resume_text: str, profile: Profile, posting: Posting, pages: int | None = None
+          ) -> tuple[ResumeReport, Match, str | None]:
+    parsed = parse_resume(resume_text, pages=pages)
+    report = score_resume(parsed, profile)
+    candidate = build_candidate(parsed, report, profile)
+    match, blocker = check_posting(posting, candidate)
+    if posting.source_category == "off-focus":
+        match.warnings.insert(0, "This looks like a tech, science or healthcare role, which is outside this app's "
+                                 "focus, so the fit estimate is rough.")
+    return report, match, blocker

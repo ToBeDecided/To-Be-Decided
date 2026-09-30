@@ -344,6 +344,59 @@ input[type=checkbox] { accent-color: var(--primary); width: 15px; height: 15px; 
 .assess .t { font-weight: 600; }
 .assess .r { grid-column: 2; color: var(--muted); font-size: 13px; }
 
+/* ---------- tracks, pay, dialog, check ---------- */
+.brand-sub { font-weight: 500; font-size: 13px; color: var(--faint); margin-left: 4px; }
+.track-picker { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.track { position: relative; }
+.track input { position: absolute; opacity: 0; pointer-events: none; }
+.track span {
+  display: flex; flex-direction: column; gap: 2px; height: 100%; padding: 10px 10px 9px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--surface-2); cursor: pointer; transition: all .12s;
+}
+.track b { font-size: 13px; }
+.track small { font-size: 11px; color: var(--faint); line-height: 1.3; }
+.track input:checked + span { border-color: var(--primary); background: var(--primary-soft); box-shadow: inset 0 0 0 1px var(--primary); }
+.track input:checked + span b { color: var(--primary); }
+.track input:focus-visible + span { box-shadow: 0 0 0 3px var(--primary-soft); }
+.areas { margin: -4px 0 14px; font-size: 13px; }
+.areas summary { cursor: pointer; color: var(--muted); margin-bottom: 8px; }
+.badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 6px; white-space: nowrap; }
+.badge.paid { background: var(--likely-soft); color: var(--likely); }
+.badge.stipend { background: var(--primary-soft); color: var(--primary); }
+.badge.unpaid { background: var(--reach-soft); color: var(--reach); }
+.badge.deadline { background: var(--target-soft); color: var(--target); }
+.badge.source { background: var(--surface-2); color: var(--muted); font-weight: 600; }
+.dialog {
+  width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - 48px); padding: 0; border: 1px solid var(--border);
+  border-radius: var(--radius); background: var(--surface); color: var(--text); box-shadow: 0 20px 60px rgba(0,0,0,.3);
+}
+.dialog::backdrop { background: rgba(10, 12, 20, .45); }
+.dialog form { display: flex; flex-direction: column; max-height: calc(100vh - 48px); }
+.dialog-head, .dialog-foot { display: flex; align-items: center; gap: 10px; padding: 16px 20px; }
+.dialog-head { justify-content: space-between; border-bottom: 1px solid var(--border); }
+.dialog-head h2 { font-size: 17px; }
+.dialog-foot { justify-content: flex-end; border-top: 1px solid var(--border); }
+.dialog-foot .small { margin-right: auto; }
+.dialog-body { padding: 16px 20px; overflow: auto; }
+.icon-btn { border: none; background: none; font-size: 16px; color: var(--muted); cursor: pointer; padding: 4px 8px; border-radius: 6px; }
+.icon-btn:hover { background: var(--surface-2); }
+.source-card { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 12px; }
+.source-card h3 { font-size: 14px; display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.source-card p { margin: 0 0 10px; font-size: 13px; color: var(--muted); }
+.source-card .field-grid { margin-top: 6px; }
+.source-card input[type=password], .source-card input[type=text], .source-card input[type=email] { font-size: 13px; }
+input[type=password], input[type=email] {
+  width: 100%; padding: 9px 11px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface-2); outline: none;
+}
+.status-pill { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
+.status-pill.on { background: var(--likely-soft); color: var(--likely); }
+.status-pill.off { background: var(--surface-2); color: var(--muted); }
+.status-pill.err { background: var(--reach-soft); color: var(--reach); }
+.check-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 12px; }
+.check-grid .wide { grid-column: 1 / -1; }
+.notice { background: var(--target-soft); color: var(--target); border-radius: var(--radius-sm); padding: 12px 14px; margin-bottom: 14px; font-size: 14px; }
+.notice a { color: inherit; text-decoration: underline; }
+
 /* ---------- responsive ---------- */
 @media (max-width: 1080px) {
   .layout { grid-template-columns: minmax(0, 1fr); }
@@ -353,7 +406,8 @@ input[type=checkbox] { accent-color: var(--primary); width: 15px; height: 15px; 
 }
 @media (max-width: 680px) {
   .topbar { padding: 10px 16px; }
-  .listing-status { display: none; }
+  .listing-status, .brand-sub, #refreshBtn { display: none; }
+  .check-grid { grid-template-columns: minmax(0, 1fr); }
   .layout { padding: 16px; gap: 16px; }
   .empty-state { padding: 28px 8px; }
   .empty-state h1 { font-size: 24px; }

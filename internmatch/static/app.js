@@ -6,6 +6,12 @@ const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 const PREFS_KEY = "internmatch:prefs";
 const APPLIED_KEY = "internmatch:applied";
 const PAGE = 40;
+const TRACK_BLURBS = {
+  "Pre-Law": "Law firms, courts, government, policy, advocacy",
+  Business: "Finance, consulting, marketing, operations",
+  Humanities: "Media, publishing, museums, education, nonprofits",
+};
+const DEFAULT_FILTERS = { q: "", tier: "all", category: "all", hideApplied: false, sort: "odds" };
 
 const state = {
   meta: null,
@@ -14,10 +20,15 @@ const state = {
   ai: null,
   aiLoading: false,
   aiError: null,
+  check: null,
+  checkLoading: false,
+  checkError: null,
+  checkForm: { title: "", company: "", location: "", url: "", description: "" },
   tab: "recommended",
-  filters: { q: "", tier: "all", category: "all", hideApplied: false, sort: "odds" },
+  filters: { ...DEFAULT_FILTERS },
   shown: PAGE,
   applied: new Set(load(APPLIED_KEY, [])),
+  pendingRemovals: new Set(),
 };
 
 // ---------------------------------------------------------------- utils
@@ -56,6 +67,9 @@ function postedLabel(iso) {
   if (d < 2) return "Posted yesterday";
   return `Posted ${Math.floor(d)} days ago`;
 }
+function shortDate(iso) {
+  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
 function scoreColor(score) {
   return score >= 75 ? "var(--good)" : score >= 55 ? "var(--warn)" : "var(--bad)";
 }
@@ -89,18 +103,32 @@ function setStatus(listings, error) {
   const when = listings.fetched_at ? new Date(listings.fetched_at) : null;
   const ago = when ? Math.round((Date.now() - when.getTime()) / 60000) : null;
   const agoText = ago === null ? "" : ago < 1 ? "just now" : ago < 60 ? `${ago} min ago` : `${Math.round(ago / 60)} h ago`;
-  el.innerHTML = `<span class="dot"></span>${listings.count.toLocaleString()} live internships · updated ${esc(agoText)}`;
-  el.title = listings.source_url || "";
+  const used = Object.values(listings.sources || {}).filter((s) => s.enabled && s.count).map((s) => s.label);
+  el.innerHTML = `<span class="dot ${listings.error ? "pending" : ""}"></span>${listings.count.toLocaleString()} internships from ${esc(used.join(", ") || "your sources")} · ${esc(agoText)}`;
+  el.title = listings.error || "";
+}
+
+function sourcesHint() {
+  const meta = state.meta;
+  if (!meta) return "";
+  const all = Object.values(meta.listings.sources || {});
+  const off = all.filter((s) => !s.enabled).map((s) => s.label);
+  if (!off.length) return "";
+  const on = all.filter((s) => s.enabled).map((s) => s.label);
+  return `Searching ${esc(on.join(" and "))}. Add free ${esc(off.join(" and "))} keys in <a href="#" data-open-settings>Sources &amp; keys</a> for many more listings, especially government, legal, museum and archive internships.`;
 }
 
 async function loadMeta() {
   try {
     const meta = await api("/api/meta");
     state.meta = meta;
-    setStatus(meta.listings, meta.listings.error && !meta.listings.count ? meta.listings.error : null);
-    renderTermChips(meta.terms, meta.default_terms);
+    setStatus(meta.listings, meta.listings.count ? null : meta.listings.error || "No listings loaded");
+    renderTrackChips(meta.tracks);
     renderCategoryChips(meta.categories);
+    renderTermChips(meta.terms, meta.default_terms);
     applyPrefs();
+    const hint = $("#sourcesHint");
+    if (hint) hint.innerHTML = sourcesHint();
     if (state.result && state.tab === "ai") renderResults();
   } catch (err) {
     setStatus(null, `Couldn't reach the app server: ${err.message}`);
@@ -109,6 +137,15 @@ async function loadMeta() {
 
 function chip(name, value, label, checked, extra = "") {
   return `<label class="chip-toggle"><input type="checkbox" name="${esc(name)}" value="${esc(value)}" ${checked ? "checked" : ""}><span>${esc(label)}${extra}</span></label>`;
+}
+
+function renderTrackChips(tracks) {
+  const box = $("#trackChips");
+  if (box.dataset.ready) return;
+  box.innerHTML = Object.keys(tracks)
+    .map((t) => `<label class="track"><input type="checkbox" name="track" value="${esc(t)}"><span><b>${esc(t)}</b><small>${esc(TRACK_BLURBS[t] || "")}</small></span></label>`)
+    .join("");
+  box.dataset.ready = "1";
 }
 
 function renderTermChips(terms, defaults) {
@@ -120,13 +157,15 @@ function renderTermChips(terms, defaults) {
   const saved = load(PREFS_KEY, null);
   const selected = new Set(saved && saved.target_terms ? saved.target_terms : defaults);
   box.innerHTML = terms
-    .filter((t) => t.count >= 3 || selected.has(t.term))
-    .map((t) => chip("term", t.term, t.term, selected.has(t.term), ` <small>${t.count}</small>`))
+    .map((t) => chip("term", t.term, t.term, selected.has(t.term), t.count ? ` <small>${t.count}</small>` : ""))
     .join("");
 }
 
 function renderCategoryChips(categories) {
-  $("#categoryChips").innerHTML = categories.map((c) => chip("category", c, c, false)).join("");
+  const box = $("#categoryChips");
+  if (box.dataset.ready) return;
+  box.innerHTML = categories.map((c) => chip("category", c, c, false)).join("");
+  box.dataset.ready = "1";
 }
 
 // ---------------------------------------------------------------- form
@@ -149,7 +188,10 @@ function readProfile() {
     gpa: num($("#gpa").value),
     work_authorization: $("#workAuth").value,
     target_terms: $$('input[name="term"]:checked').map((i) => i.value),
+    include_unknown_terms: $("#includeUnknownTerms").checked,
+    target_tracks: $$('input[name="track"]:checked').map((i) => i.value),
     target_categories: $$('input[name="category"]:checked').map((i) => i.value),
+    paid_only: $("#paidOnly").checked,
     locations: splitList($("#locations").value),
     remote_ok: $("#remoteOk").checked,
     location_strict: $("#locationStrict").checked,
@@ -160,8 +202,7 @@ function readProfile() {
 }
 
 function savePrefs() {
-  const p = readProfile();
-  save(PREFS_KEY, { ...p, boards: $("#boards").value, enrich: $("#enrich").checked });
+  save(PREFS_KEY, { ...readProfile(), boards: $("#boards").value, enrich: $("#enrich").checked });
 }
 
 function applyPrefs() {
@@ -171,6 +212,8 @@ function applyPrefs() {
   $("#gradYear").value = p.grad_year ? String(p.grad_year) : "";
   $("#gpa").value = p.gpa ?? "";
   $("#workAuth").value = p.work_authorization || "citizen";
+  $("#includeUnknownTerms").checked = p.include_unknown_terms !== false;
+  $("#paidOnly").checked = !!p.paid_only;
   $("#locations").value = (p.locations || []).join(", ");
   $("#remoteOk").checked = p.remote_ok !== false;
   $("#locationStrict").checked = !!p.location_strict;
@@ -179,8 +222,11 @@ function applyPrefs() {
   $("#maxAge").value = p.max_age_days ? String(p.max_age_days) : "";
   $("#boards").value = p.boards || "";
   $("#enrich").checked = p.enrich !== false;
+  const tracks = new Set(p.target_tracks || []);
+  $$('input[name="track"]').forEach((i) => (i.checked = tracks.has(i.value)));
   const cats = new Set(p.target_categories || []);
   $$('input[name="category"]').forEach((i) => (i.checked = cats.has(i.value)));
+  if (cats.size) $(".areas").open = true;
 }
 
 function setupDropzone() {
@@ -210,7 +256,7 @@ async function onSubmit(e) {
   const file = $("#resumeFile").files[0];
   const text = $("#resumeText").value.trim();
   if (!file && text.length < 50) {
-    renderError("Add your resume first: upload a PDF/DOCX/TXT or paste the text.");
+    renderError("Add your resume first: upload a PDF or Word file, or paste the text.");
     return;
   }
   savePrefs();
@@ -226,14 +272,16 @@ async function onSubmit(e) {
   const btn = $("#analyzeBtn");
   btn.disabled = true;
   btn.textContent = "Analyzing…";
-  $("#results").innerHTML = `<div class="loading"><div class="spinner"></div>Grading your resume and scoring thousands of postings…<br><span class="small">Fetching job descriptions for your top matches can take a few seconds.</span></div>`;
+  $("#results").innerHTML = `<div class="loading"><div class="spinner"></div>Grading your resume and scoring live postings…<br><span class="small">The first search of the day downloads fresh listings and can take 20–30 seconds.</span></div>`;
   try {
     state.result = await api("/api/analyze", { method: "POST", body: fd });
     state.profile = profile;
     state.ai = null;
     state.aiError = null;
+    state.check = null;
+    state.checkError = null;
     state.shown = PAGE;
-    state.filters = { q: "", tier: "all", category: "all", hideApplied: state.filters.hideApplied, sort: "odds" };
+    state.filters = { ...DEFAULT_FILTERS, hideApplied: state.filters.hideApplied };
     state.tab = "recommended";
     renderResults();
     if (window.innerWidth < 1080) $("#results").scrollIntoView({ behavior: "smooth" });
@@ -246,8 +294,7 @@ async function onSubmit(e) {
 }
 
 function renderError(msg) {
-  const existing = state.result;
-  if (existing) {
+  if (state.result) {
     renderResults();
     $("#results").insertAdjacentHTML("afterbegin", `<div class="error-box">${esc(msg)}</div>`);
   } else {
@@ -266,6 +313,7 @@ function ring(score, label) {
 function renderSummary() {
   const { resume, profile, stats } = state.result;
   const verdict = resume.overall >= 85 ? "Excellent" : resume.overall >= 72 ? "Solid" : resume.overall >= 58 ? "Fair" : "Needs work";
+  const topTrack = (profile.track_fit || [])[0];
   return `
   <div class="summary">
     <div class="card score-card">
@@ -279,7 +327,7 @@ function renderSummary() {
     <div class="card">
       <div class="kicker">Candidate strength</div>
       <div class="big">${profile.candidate_strength}<span class="muted" style="font-size:16px;font-weight:500"> / 100</span></div>
-      <div class="stat-sub">${esc(profile.level)} · best fit: ${esc(profile.category_fit.slice(0, 2).map((c) => c.category).join(", "))}</div>
+      <div class="stat-sub">${esc(profile.level)}${topTrack && topTrack.fit > 20 ? ` · strongest track: ${esc(topTrack.category)}` : ""}</div>
     </div>
     <div class="card tiers-card">
       <div class="kicker">${stats.eligible.toLocaleString()} postings you can apply to</div>
@@ -297,6 +345,7 @@ function renderTabs() {
   const tabs = [
     ["recommended", "Recommended", recommended.length],
     ["all", "All matches", stats.eligible],
+    ["check", "Check a posting", null],
     ["resume", "Resume report", null],
     ["ai", "AI review", null],
   ];
@@ -320,40 +369,53 @@ function filteredMatches() {
     }
     return true;
   });
+  const deadlineOf = (m) => (m.posting.deadline ? Date.parse(m.posting.deadline) : Infinity);
   if (f.sort === "fit") rows = [...rows].sort((a, b) => b.match_score - a.match_score || b.likelihood - a.likelihood);
   else if (f.sort === "newest") rows = [...rows].sort((a, b) => (ageDays(a.posting.date_posted) ?? 999) - (ageDays(b.posting.date_posted) ?? 999));
+  else if (f.sort === "deadline") rows = [...rows].sort((a, b) => deadlineOf(a) - deadlineOf(b));
   return rows;
 }
 
-function jobCard(m) {
+function payBadge(p) {
+  if (p.pay === "paid") return `<span class="badge paid">${esc(p.pay_detail && p.pay_detail !== "Paid" ? p.pay_detail : "Paid")}</span>`;
+  if (p.pay === "stipend") return `<span class="badge stipend">Stipend</span>`;
+  if (p.pay === "unpaid") return `<span class="badge unpaid">${esc(p.pay_detail || "Unpaid")}</span>`;
+  return "";
+}
+
+function jobCard(m, { interactive = true } = {}) {
   const p = m.posting;
   const age = ageDays(p.date_posted);
   const locs = p.locations.length > 3 ? `${p.locations.slice(0, 3).join(" · ")} +${p.locations.length - 3}` : p.locations.join(" · ");
   const applied = state.applied.has(p.id);
   const ai = state.ai && state.ai.job_assessments.find((j) => j.posting_id === p.id);
   const tierBg = `bg-${m.tier.toLowerCase()}`;
+  const pasted = p.source === "Pasted";
+  const deadline = p.deadline ? `<span class="badge deadline">Apply by ${esc(shortDate(p.deadline))}</span>` : "";
   return `
-  <article class="job ${applied ? "applied" : ""}" data-id="${esc(p.id)}">
+  <article class="job ${applied && interactive ? "applied" : ""}" data-id="${esc(p.id)}">
     <div class="job-main">
       <div class="job-head">
         <span class="tier ${tierClass(m.tier)}">${esc(m.tier)}</span>
         <div>
-          <h4><a href="${esc(safeUrl(p.url))}" target="_blank" rel="noopener">${esc(p.title)}</a></h4>
+          <h4>${p.url ? `<a href="${esc(safeUrl(p.url))}" target="_blank" rel="noopener">${esc(p.title)}</a>` : esc(p.title)}</h4>
           <div class="company">${esc(p.company)}</div>
         </div>
       </div>
       <div class="job-meta">
         ${locs ? `<span>${esc(locs)}</span>` : ""}
-        <span class="${age !== null && age <= 7 ? "fresh" : ""}">${esc(postedLabel(p.date_posted))}</span>
+        ${pasted ? "" : `<span class="${age !== null && age <= 7 ? "fresh" : ""}">${esc(postedLabel(p.date_posted))}</span>`}
         ${p.terms.length ? `<span>${esc(p.terms.join(", "))}</span>` : ""}
-        <span>${esc(p.category)}${m.focus ? ` · ${esc(m.focus)}` : ""}</span>
+        <span>${esc(p.category)}${m.focus && !p.category.toLowerCase().includes(m.focus.split(/[ /&]/)[0].toLowerCase()) ? ` · ${esc(m.focus)}` : ""}</span>
+        ${payBadge(p)} ${deadline}
+        ${pasted ? "" : `<span class="badge source">via ${esc(p.source)}</span>`}
       </div>
       <div class="chips">
         ${m.matched_skills.slice(0, 7).map((s) => `<span class="chip have">${esc(s)}</span>`).join("")}
         ${m.missing_skills.slice(0, 4).map((s) => `<span class="chip need" title="Mentioned for this role but not on your resume">+ ${esc(s)}</span>`).join("")}
       </div>
       ${ai ? `<div class="ai-note"><b>AI: ${esc(ai.verdict)}.</b> ${esc(ai.reasoning)}</div>` : ""}
-      <details class="why">
+      <details class="why" ${interactive ? "" : "open"}>
         <summary>Why this rating</summary>
         <ul>
           ${m.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}
@@ -365,8 +427,8 @@ function jobCard(m) {
       <div class="metric"><span>Interview odds</span><b>${m.likelihood}</b></div>
       <div class="meter" title="Relative odds score (0–100), used for ranking. Not a literal probability."><span class="${tierBg}" style="width:${m.likelihood}%"></span></div>
       <div class="metric"><span>Resume fit</span><b>${m.match_score}%</b></div>
-      <a class="btn primary small" href="${esc(safeUrl(p.url))}" target="_blank" rel="noopener">Apply ↗</a>
-      <label class="applied-toggle"><input type="checkbox" data-applied="${esc(p.id)}" ${applied ? "checked" : ""}> Applied</label>
+      ${p.url ? `<a class="btn primary small" href="${esc(safeUrl(p.url))}" target="_blank" rel="noopener">Apply ↗</a>` : ""}
+      ${interactive ? `<label class="applied-toggle"><input type="checkbox" data-applied="${esc(p.id)}" ${applied ? "checked" : ""}> Applied</label>` : ""}
     </div>
   </article>`;
 }
@@ -377,38 +439,42 @@ function renderJobs() {
   const cats = [...new Set(state.result.matches.map((m) => m.posting.category))].sort();
   const tierBtn = (t) => `<button type="button" data-filter-tier="${t}" class="${f.tier === t ? "active" : ""}">${t === "all" ? "All" : t}</button>`;
   const intro = state.tab === "recommended"
-    ? `Your best shots: the highest-odds roles you're eligible for, at most two per company. Apply to the fresh ones first.`
-    : `Every posting you're eligible for, ranked by interview odds${state.result.matches.length < state.result.stats.eligible ? ` (top ${state.result.matches.length} shown)` : ""}.`;
+    ? "Your best shots: the highest-odds roles you're eligible for, at most two per employer. Apply to the fresh ones first."
+    : "Every posting you're eligible for, ranked by interview odds.";
+  const empty = state.result.stats.eligible === 0
+    ? `<div class="notice">No postings matched. Try selecting more tracks or terms, turning off “Only show my locations”, or adding sources in <a href="#" data-open-settings>Sources &amp; keys</a>. You can also score any posting you've found yourself in <a href="#" data-tab="check">Check a posting</a>.</div>`
+    : `<div class="card muted">No postings match these filters.</div>`;
   return `
   <p class="list-meta">${intro}</p>
   <div class="toolbar">
-    <input type="text" id="q" placeholder="Search company, role, skill…" value="${esc(f.q)}">
+    <input type="text" id="q" placeholder="Search employer, role, skill…" value="${esc(f.q)}">
     <div class="segmented">${["all", "Likely", "Target", "Reach"].map(tierBtn).join("")}</div>
-    <select id="catFilter"><option value="all">All categories</option>${cats.map((c) => `<option ${f.category === c ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>
+    <select id="catFilter"><option value="all">All areas</option>${cats.map((c) => `<option ${f.category === c ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>
     <select id="sortSel">
       <option value="odds" ${f.sort === "odds" ? "selected" : ""}>Best odds</option>
       <option value="fit" ${f.sort === "fit" ? "selected" : ""}>Best fit</option>
       <option value="newest" ${f.sort === "newest" ? "selected" : ""}>Newest</option>
+      <option value="deadline" ${f.sort === "deadline" ? "selected" : ""}>Deadline</option>
     </select>
     <label class="toggle"><input type="checkbox" id="hideApplied" ${f.hideApplied ? "checked" : ""}> Hide applied</label>
     <button class="btn ghost small" id="exportBtn" type="button">Export CSV</button>
   </div>
   <div id="jobList">
-    ${rows.length ? rows.slice(0, state.shown).map(jobCard).join("") : `<div class="card muted">No postings match these filters.</div>`}
+    ${rows.length ? rows.slice(0, state.shown).map((m) => jobCard(m)).join("") : empty}
   </div>
   ${rows.length > state.shown ? `<div class="more"><button class="btn ghost" id="moreBtn" type="button">Show more (${(rows.length - state.shown).toLocaleString()} left)</button></div>` : ""}`;
 }
 
 function exportCsv() {
   const rows = filteredMatches();
-  const cols = ["Tier", "Odds", "Fit", "Company", "Title", "Category", "Locations", "Terms", "Posted", "Matched skills", "Missing skills", "URL", "Applied"];
+  const cols = ["Tier", "Odds", "Fit", "Employer", "Title", "Area", "Locations", "Terms", "Posted", "Deadline", "Pay", "Matched skills", "Missing skills", "Source", "URL", "Applied"];
   const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
   const lines = [cols.map(q).join(",")];
   for (const m of rows) {
     const p = m.posting;
     lines.push([m.tier, m.likelihood, m.match_score, p.company, p.title, p.category, p.locations.join("; "), p.terms.join("; "),
-      p.date_posted ? p.date_posted.slice(0, 10) : "", m.matched_skills.join(", "), m.missing_skills.join(", "), p.url,
-      state.applied.has(p.id) ? "yes" : ""].map(q).join(","));
+      p.date_posted ? p.date_posted.slice(0, 10) : "", p.deadline ? p.deadline.slice(0, 10) : "", p.pay_detail || p.pay,
+      m.matched_skills.join(", "), m.missing_skills.join(", "), p.source, p.url, state.applied.has(p.id) ? "yes" : ""].map(q).join(","));
   }
   const blob = new Blob([lines.join("\n")], { type: "text/csv" });
   const a = document.createElement("a");
@@ -418,11 +484,66 @@ function exportCsv() {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
+// ---------------------------------------------------------------- rendering: check a posting
+function renderCheck() {
+  const f = state.checkForm;
+  const result = state.check;
+  let out = `
+  <div class="card" style="margin-bottom:16px">
+    <h3>Check any posting</h3>
+    <p class="muted small" style="margin:-6px 0 14px">Found an internship on Handshake, LinkedIn, a law firm's site or a museum's careers page? Paste it here to see your fit, your odds and which keywords to add.</p>
+    <form id="checkForm" class="check-grid">
+      <label class="field"><span>Job title</span><input type="text" name="title" required value="${esc(f.title)}" placeholder="e.g. Legal Intern"></label>
+      <label class="field"><span>Employer</span><input type="text" name="company" value="${esc(f.company)}" placeholder="e.g. Brennan Center for Justice"></label>
+      <label class="field"><span>Location</span><input type="text" name="location" value="${esc(f.location)}" placeholder="e.g. New York, NY"></label>
+      <label class="field"><span>Link <em>(optional)</em></span><input type="text" name="url" value="${esc(f.url)}" placeholder="https://…"></label>
+      <label class="field wide"><span>Job description</span><textarea name="description" rows="8" placeholder="Paste the full description, including qualifications">${esc(f.description)}</textarea></label>
+      <div class="wide"><button class="btn primary" type="submit" ${state.checkLoading ? "disabled" : ""}>${state.checkLoading ? "Checking…" : "Check my fit"}</button></div>
+    </form>
+    ${state.checkError ? `<div class="error-box" style="margin:14px 0 0">${esc(state.checkError)}</div>` : ""}
+  </div>`;
+  if (result) {
+    const m = result.match;
+    if (result.blocker) out += `<div class="notice"><b>Heads up:</b> ${esc(result.blocker)}</div>`;
+    out += jobCard(m, { interactive: false });
+    if (m.missing_skills.length) {
+      out += `<div class="card"><h3>Keywords to work in (only if they're true)</h3><div class="chips" style="margin:0">${m.missing_skills.map((s) => `<span class="chip">${esc(s)}</span>`).join("")}</div><p class="small muted" style="margin:12px 0 0">Applicant tracking systems and recruiters scan for the posting's own words. Mirror them in your bullets and Skills section where they honestly describe your experience.</p></div>`;
+    }
+  }
+  return out;
+}
+
+async function runCheck(form) {
+  const data = new FormData(form);
+  state.checkForm = Object.fromEntries(["title", "company", "location", "url", "description"].map((k) => [k, String(data.get(k) || "")]));
+  if (!state.checkForm.title.trim()) {
+    state.checkError = "Add the job title.";
+    renderResults();
+    return;
+  }
+  const fd = new FormData();
+  for (const [k, v] of Object.entries(state.checkForm)) fd.append(k, v);
+  fd.append("resume_text", state.result.resume_text);
+  fd.append("profile", JSON.stringify(state.profile || {}));
+  state.checkLoading = true;
+  state.checkError = null;
+  renderResults();
+  try {
+    state.check = await api("/api/check", { method: "POST", body: fd });
+  } catch (err) {
+    state.checkError = err.message;
+  } finally {
+    state.checkLoading = false;
+    if (state.tab === "check") renderResults();
+  }
+}
+
 // ---------------------------------------------------------------- rendering: resume report
 const GROUP_LABELS = {
-  language: "Languages", web: "Web", backend: "Backend", mobile: "Mobile", data: "Data", ml: "ML / AI",
-  cloud: "Cloud & DevOps", tools: "Tools", systems: "Systems", cs: "CS fundamentals", hardware: "Hardware",
-  quant: "Quant & math", product: "Product & design", security: "Security", other: "Other",
+  legal: "Legal", policy: "Government & policy", finance: "Finance & accounting", business: "Business",
+  marketing: "Marketing & communications", writing: "Writing & media", arts: "Arts & culture", education: "Teaching",
+  research: "Research", nonprofit: "Nonprofit & advocacy", language: "Languages", tools: "Software & tools",
+  general: "General", other: "Other",
 };
 
 function bar(label, score, detail, right) {
@@ -440,7 +561,8 @@ function renderReport() {
       ${r.subscores.map((s) => bar(`${s.label} (${Math.round(s.weight * 100)}%)`, s.score, s.detail)).join("")}
     </div>
     <div class="card"><h3>Where you fit</h3>
-      ${p.category_fit.map((c) => bar(c.category, c.fit, null, `${c.fit}`)).join("")}
+      ${(p.track_fit || []).map((t) => bar(t.category, t.fit, null, `${t.fit}`)).join("")}
+      <details style="margin-top:6px"><summary class="small muted" style="cursor:pointer">By area</summary><div style="margin-top:10px">${p.category_fit.map((c) => bar(c.category, c.fit, null, `${c.fit}`)).join("")}</div></details>
       ${p.notes.length ? `<ul class="notes">${p.notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>` : ""}
     </div>
   </div>
@@ -462,9 +584,10 @@ function renderReport() {
         <dt>Degree</dt><dd>${esc(d.degree || "not found")}${d.major ? `, ${esc(d.major)}` : ""}</dd>
         <dt>Graduation</dt><dd>${esc(d.grad_year || "not found")}</dd>
         <dt>GPA</dt><dd>${esc(d.gpa ?? "not listed")}</dd>
+        <dt>Languages</dt><dd>${esc(d.languages || "none listed")}</dd>
         <dt>Length</dt><dd>${r.stats.pages ? `${r.stats.pages} page(s), ` : ""}${r.stats.word_count} words, ${r.stats.bullets} bullets</dd>
-        <dt>Experience</dt><dd>${r.stats.roles} role(s), ${r.stats.internships} internship(s), ${r.stats.projects} project(s)</dd>
-        <dt>Contact</dt><dd>${yn(r.contact.email)} email ${yn(r.contact.phone)} phone ${yn(r.contact.linkedin)} LinkedIn ${yn(r.contact.github || r.contact.portfolio)} GitHub/site</dd>
+        <dt>Experience</dt><dd>${r.stats.roles} role(s), ${r.stats.internships} internship(s), ${r.stats.leadership_roles} leadership position(s)</dd>
+        <dt>Contact</dt><dd>${yn(r.contact.email)} email ${yn(r.contact.phone)} phone ${yn(r.contact.linkedin)} LinkedIn ${yn(r.contact.portfolio)} portfolio</dd>
       </dl>
       <p class="small muted" style="margin:12px 0 0">Something wrong? Set it in “About you” and re-run.</p>
     </div>
@@ -480,8 +603,7 @@ function renderAI() {
   if (!meta.ai.available) {
     return `<div class="card"><h3>AI review with Claude</h3>
       <p class="muted">Get a recruiter-style critique, line-by-line bullet rewrites, and a second opinion on your top matches.</p>
-      <p>To turn it on, get an API key from <a href="https://console.anthropic.com/" target="_blank" rel="noopener">console.anthropic.com</a>, then restart the app with it set:</p>
-      <pre class="card" style="padding:10px 12px;overflow:auto;box-shadow:none">export ANTHROPIC_API_KEY=sk-ant-...\ninternmatch serve</pre>
+      <p>To turn it on, create an API key at <a href="https://console.anthropic.com/" target="_blank" rel="noopener">console.anthropic.com</a> and paste it into <a href="#" data-open-settings>Sources &amp; keys</a>.</p>
       <p class="small muted">Everything else in this app works without it.</p></div>`;
   }
   const intro = `<div class="card" style="margin-bottom:16px"><div class="ai-intro"><div><h3 style="margin:0">AI review with Claude</h3>
@@ -493,7 +615,7 @@ function renderAI() {
   const a = state.ai;
   const byId = Object.fromEntries(state.result.recommended.map((m) => [m.posting.id, m]));
   return intro + `
-  <div class="summary" style="grid-template-columns:auto 1fr">
+  <div class="summary" style="grid-template-columns:auto minmax(0,1fr)">
     <div class="card score-card">${ring(a.score, "AI score")}</div>
     <div class="card"><div class="kicker">Recruiter's take</div><p style="margin:6px 0 0;font-size:15px">${esc(a.summary)}</p></div>
   </div>
@@ -536,17 +658,100 @@ async function runAI() {
   }
 }
 
+// ---------------------------------------------------------------- settings dialog
+const SOURCE_FIELDS = {
+  themuse: [["themuse_api_key", "API key (optional, raises the rate limit)", "password"]],
+  usajobs: [["usajobs_email", "Email you registered with", "email"], ["usajobs_api_key", "API key", "password"]],
+  adzuna: [["adzuna_app_id", "App ID", "text"], ["adzuna_app_key", "App key", "password"]],
+};
+
+function settingInput(name, label, type) {
+  const s = state.meta.settings[name] || {};
+  const fromEnv = s.source === "environment";
+  const secret = type === "password";
+  const value = !secret && s.configured ? s.value : "";
+  const placeholder = s.configured ? (secret ? `Saved (${s.value})` : "") : "Not set";
+  const removing = state.pendingRemovals.has(name);
+  const removeLink = s.configured && !fromEnv ? ` · <a href="#" data-remove="${esc(name)}">${removing ? "will be removed" : "remove"}</a>` : "";
+  return `<label class="field"><span>${esc(label)}${removeLink}</span>
+    <input type="${type}" name="${esc(name)}" value="${esc(value)}" placeholder="${esc(fromEnv ? "Set by an environment variable" : placeholder)}" ${fromEnv ? "disabled" : ""} autocomplete="off" spellcheck="false"></label>`;
+}
+
+function renderSettings() {
+  const meta = state.meta;
+  if (!meta) return;
+  const sources = meta.listings.sources || {};
+  const cards = Object.entries(sources).map(([name, s]) => {
+    const pill = !s.enabled ? `<span class="status-pill off">Off</span>`
+      : s.error && !s.count ? `<span class="status-pill err">Error</span>`
+      : `<span class="status-pill on">${s.count.toLocaleString()} internships</span>`;
+    const signup = s.needs.length ? `<a href="${esc(safeUrl(s.signup))}" target="_blank" rel="noopener">Get a free key ↗</a>` : "";
+    return `<div class="source-card"><h3>${esc(s.label)} ${pill}</h3><p>${esc(s.about)} ${signup}</p>
+      ${s.error ? `<p class="small" style="color:var(--bad)">${esc(s.error)}</p>` : ""}
+      <div class="field-grid">${(SOURCE_FIELDS[name] || []).map(([k, l, t]) => settingInput(k, l, t)).join("")}</div></div>`;
+  }).join("");
+  const ai = `<div class="source-card"><h3>Claude (AI review) ${meta.ai.available ? `<span class="status-pill on">On</span>` : `<span class="status-pill off">Off</span>`}</h3>
+    <p>Optional recruiter-style resume critique. <a href="https://console.anthropic.com/" target="_blank" rel="noopener">Get an API key ↗</a></p>
+    ${settingInput("anthropic_api_key", "Anthropic API key", "password")}</div>`;
+  $("#settingsBody").innerHTML = cards + ai;
+  $("#settingsNote").textContent = `Keys are stored only on this computer (${meta.config_dir}).`;
+}
+
+function openSettings() {
+  if (!state.meta) return;
+  state.pendingRemovals.clear();
+  renderSettings();
+  $("#settingsDialog").showModal();
+}
+
+async function saveSettings(e) {
+  e.preventDefault();
+  const values = {};
+  for (const input of $$("#settingsBody input")) {
+    if (input.disabled) continue;
+    const name = input.name;
+    const v = input.value.trim();
+    const s = state.meta.settings[name] || {};
+    if (state.pendingRemovals.has(name)) values[name] = "";
+    else if (v && (input.type === "password" || v !== s.value)) values[name] = v;
+  }
+  const btn = $("#saveSettings");
+  btn.disabled = true;
+  btn.textContent = "Saving…";
+  try {
+    if (Object.keys(values).length) {
+      await api("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ values }) });
+      $("#settingsDialog").close();
+      $("#listingStatus").innerHTML = `<span class="dot pending"></span>Loading listings from your sources…`;
+      try {
+        await api("/api/refresh", { method: "POST" });
+      } catch {
+        /* per-source errors are reported by /api/meta */
+      }
+      await loadMeta();
+    } else {
+      $("#settingsDialog").close();
+    }
+  } catch (err) {
+    $("#settingsNote").textContent = err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Save";
+  }
+}
+
 // ---------------------------------------------------------------- main render + events
 function renderResults() {
   if (!state.result) return;
   let body;
   if (state.tab === "resume") body = renderReport();
   else if (state.tab === "ai") body = renderAI();
+  else if (state.tab === "check") body = renderCheck();
   else body = renderJobs();
   $("#results").innerHTML = renderSummary() + renderTabs() + body;
   const warn = state.result.stats.board_errors;
-  if (warn && state.tab !== "resume" && state.tab !== "ai") {
-    $("#results").insertAdjacentHTML("afterbegin", `<div class="error-box">Some company boards couldn't be loaded: ${esc(warn)}</div>`);
+  if (warn && (state.tab === "recommended" || state.tab === "all")) {
+    $("#results").insertAdjacentHTML("afterbegin", `<div class="error-box">Some employer boards couldn't be loaded: ${esc(warn)}</div>`);
   }
 }
 
@@ -561,7 +766,23 @@ function rerenderJobsKeepingFocus() {
   }
 }
 
-function bindResultEvents() {
+function bindEvents() {
+  document.addEventListener("click", (e) => {
+    const open = e.target.closest("[data-open-settings]");
+    if (open) {
+      e.preventDefault();
+      openSettings();
+      return;
+    }
+    const remove = e.target.closest("[data-remove]");
+    if (remove) {
+      e.preventDefault();
+      const name = remove.dataset.remove;
+      if (state.pendingRemovals.has(name)) state.pendingRemovals.delete(name);
+      else state.pendingRemovals.add(name);
+      renderSettings();
+    }
+  });
   const root = $("#results");
   root.addEventListener("click", (e) => {
     const tab = e.target.closest("[data-tab]");
@@ -597,11 +818,19 @@ function bindResultEvents() {
       runAI();
     }
   });
+  root.addEventListener("submit", (e) => {
+    if (e.target.id === "checkForm") {
+      e.preventDefault();
+      runCheck(e.target);
+    }
+  });
   root.addEventListener("input", (e) => {
     if (e.target.id === "q") {
       state.filters.q = e.target.value;
       state.shown = PAGE;
       rerenderJobsKeepingFocus();
+    } else if (e.target.closest("#checkForm")) {
+      state.checkForm[e.target.name] = e.target.value;
     }
   });
   root.addEventListener("change", (e) => {
@@ -628,8 +857,7 @@ async function onRefresh() {
   btn.disabled = true;
   $("#listingStatus").innerHTML = `<span class="dot pending"></span>Downloading latest postings…`;
   try {
-    const status = await api("/api/refresh", { method: "POST" });
-    setStatus(status);
+    await api("/api/refresh", { method: "POST" });
     await loadMeta();
   } catch (err) {
     setStatus(null, err.message);
@@ -641,8 +869,10 @@ async function onRefresh() {
 document.addEventListener("DOMContentLoaded", () => {
   gradYearOptions();
   setupDropzone();
-  bindResultEvents();
+  bindEvents();
   $("#form").addEventListener("submit", onSubmit);
   $("#refreshBtn").addEventListener("click", onRefresh);
+  $("#settingsBtn").addEventListener("click", openSettings);
+  $("#saveSettings").addEventListener("click", saveSettings);
   loadMeta();
 });
