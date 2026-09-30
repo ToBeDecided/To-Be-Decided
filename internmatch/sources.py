@@ -169,7 +169,8 @@ def make_posting(
         label_cat, label_how = classify(source_category)
         if label_how == "off" and how == "none":
             return None
-        desc_cat, _ = classify_description(skills)
+        # A vague title needs clearer evidence from the description than a weak one does.
+        desc_cat, _ = classify_description(skills, min_weight=3 if how == "weak" else 4.5)
         if how == "weak":
             # "Operations Analyst" is a business role unless the job board's label is backed by the description.
             if label_how == "strong" and (not substantial or category_weights(skills)[label_cat] >= 2):

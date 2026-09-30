@@ -495,7 +495,8 @@ _OFF_FOCUS = re.compile(
     r"pilot|aviation|security guard|environmental|ecolog|wildlife|forestry|fisheries|biomedical|\bbio|nuclear|"
     r"\br&d\b|research and development|supplier quality|quality (engineer|assurance|control)|lawn|landscap|"
     r"automotive|plant operations|field service|maintenance|patholog|anatom|histolog|specimen|diagnostic|"
-    r"hygien|\benv\b|\bconst\b|\bpvd\b|chips?\b|voltage|firmware|robotic",
+    r"hygien|\benv\b|\bconst\b|\bpvd\b|chips?\b|voltage|firmware|robotic|\bsafety\b|\bes&h\b|\behs\b|"
+    r"\belec\b|\beng\b",
     re.I,
 )
 # Phrases in a job description that mark a technical, scientific or medical role.
@@ -505,7 +506,7 @@ _OFF_FOCUS_DESCRIPTION = re.compile(
     r"(mechanical|electrical|civil|chemical|industrial|software|process) engineering|environmental science|"
     r"laboratory|clinical|patient care|programming languages|software development|construction management|"
     r"industrial hygiene|semiconductor|manufacturing process|cad software|autocad|solidworks|matlab|"
-    r"python|java\b|c\+\+|machine learning|data science",
+    r"python|java\b|c\+\+|machine learning|data science|nuclear|reactor|power plant",
     re.I,
 )
 # Employers whose weakly-titled roles ("Intern, Year Round") are almost always technical.
@@ -546,11 +547,19 @@ def category_weights(skills: dict[str, int] | set[str]) -> dict[str, float]:
     return {cat: sum(w for skill, w in sig.items() if skill in skills) for cat, sig in CATEGORY_SIGNATURES.items()}
 
 
-def classify_description(skills: dict[str, int] | set[str]) -> tuple[str | None, float]:
+# Skills nearly every posting asks for. They count for little when judging fit.
+GENERIC_SKILLS = frozenset({
+    "Microsoft Office", "Google Workspace", "Excel", "PowerPoint", "Writing", "Research", "Communication",
+    "Public Speaking", "Customer Service", "Data Entry", "Administrative Support", "Project Management",
+    "Data Analysis",
+})
+
+
+def classify_description(skills: dict[str, int] | set[str], min_weight: float = 3) -> tuple[str | None, float]:
     """Best-matching category for a job description's skills: (category or None if unclear, weight)."""
     scores = category_weights(skills)
     best = max(scores, key=scores.get)
-    return (best, scores[best]) if scores[best] >= 3 else (None, scores[best])
+    return (best, scores[best]) if scores[best] >= min_weight else (None, scores[best])
 
 
 def off_focus_description(text: str) -> int:

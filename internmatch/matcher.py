@@ -21,7 +21,15 @@ from datetime import datetime, timezone
 from .companies import normalize_company, selectivity
 from .models import CategoryFit, Match, Posting, Profile, ProfileSummary, ResumeReport
 from .resume import ParsedResume, category_affinity, school_level
-from .skills import LANGUAGE_NAMES, TRACKS, canonical, categories_for, extract_skills, title_requirements
+from .skills import (
+    GENERIC_SKILLS,
+    LANGUAGE_NAMES,
+    TRACKS,
+    canonical,
+    categories_for,
+    extract_skills,
+    title_requirements,
+)
 from .sources import term_started
 
 US_STATES = {
@@ -213,6 +221,7 @@ _TIER_REQUIREMENT = {"standard": 0.50, "high": 0.68, "elite": 0.82}
 # resume score can't see (school, referrals, networking), so cap the competitiveness factor.
 _TIER_CEILING = {"standard": 1.0, "high": 0.88, "elite": 0.7}
 LIKELY_AT, TARGET_AT = 70, 50
+STALE_AFTER_DAYS = 180  # some boards keep listings up long after they've been filled
 
 
 def effective_sponsorship(p: Posting) -> str:
@@ -233,6 +242,9 @@ def hard_block(p: Posting, c: Candidate, now: datetime) -> str | None:
         return "closed"
     if p.terms and all(term_started(t, now) for t in p.terms):
         return "closed"  # e.g. a "Summer 2026" posting still listed in the fall of 2026
+    years = [int(y) for y in re.findall(r"\b(20\d{2})\b", p.title)]
+    if years and max(years) < now.year:
+        return "closed"  # "2025 Summer Intern" still listed in 2026
     auth = c.profile.work_authorization
     spons = effective_sponsorship(p)
     if auth == "needs_sponsorship" and spons in {"no_sponsorship", "citizenship_required"}:
@@ -286,10 +298,11 @@ def eligibility(p: Posting, c: Candidate, now: datetime) -> str | None:
     if prof.location_strict and c.location_terms:
         if not location_match(p, c.location_terms) and not (prof.remote_ok and is_remote(p)):
             return "location"
-    if prof.max_age_days:
-        age = p.age_days(now)
-        if age is not None and age > prof.max_age_days:
-            return "age"
+    age = p.age_days(now)
+    if age is not None and age > STALE_AFTER_DAYS:
+        return "stale"
+    if prof.max_age_days and age is not None and age > prof.max_age_days:
+        return "age"
     return None
 
 
@@ -333,8 +346,13 @@ def score_posting(p: Posting, c: Candidate, now: datetime) -> Match:
     desc_skills = p.skills or (extract_skills(p.description) if p.description else {})
     desc_score = None
     if desc_skills:
+        # Specific skills (Westlaw, AP style, valuation) say far more about fit than generic ones (Word, "research").
+        def weight(skill: str) -> float:
+            return 0.3 if skill in GENERIC_SKILLS else 1.0
+
         hit = [s for s in desc_skills if s in c.skills]
-        desc_score = min(1.0, len(hit) / max(3.0, 0.5 * len(desc_skills)))
+        wanted = sum(weight(s) for s in desc_skills)
+        desc_score = min(1.0, sum(weight(s) for s in hit) / max(2.5, 0.5 * wanted))
         for s in sorted(hit, key=lambda s: -desc_skills[s]):
             if s not in matched:
                 matched.append(s)
@@ -350,10 +368,10 @@ def score_posting(p: Posting, c: Candidate, now: datetime) -> Match:
 
     comps: list[tuple[float, float]] = []
     if desc_score is not None:
-        comps.append((desc_score, 0.35))
+        comps.append((desc_score, 0.30))
     if group_score is not None:
-        comps.append((group_score, 0.25 if desc_score is not None else 0.40))
-    comps.append((cat_aff, 0.25))
+        comps.append((group_score, 0.20 if desc_score is not None else 0.35))
+    comps.append((cat_aff, 0.35))
     if title_rel is not None:
         comps.append((title_rel, 0.15))
     fit = sum(v * w for v, w in comps) / sum(w for _, w in comps)
@@ -504,6 +522,8 @@ def summarize_profile(c: Candidate, report: ResumeReport, excluded: Counter[str]
         notes.append(f"Hid {excluded['unpaid']} unpaid postings.")
     if excluded.get("closed"):
         notes.append(f"Hid {excluded['closed']} postings that have closed or are for a term that has already started.")
+    if excluded.get("stale"):
+        notes.append(f"Hid {excluded['stale']} postings more than six months old (almost certainly filled).")
     if excluded.get("outside US"):
         notes.append(f"Hid {excluded['outside US']} postings outside the United States (change this under "
                      "preferred locations).")

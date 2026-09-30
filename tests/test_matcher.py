@@ -133,6 +133,31 @@ def test_postings_for_past_terms_are_closed(prelaw_text):
     assert not matches and excluded["closed"] == 1
 
 
+def test_stale_and_past_year_postings_are_hidden(prelaw_text):
+    now = datetime.now(timezone.utc)
+    old = Posting(id="old", source="t", company="A", title="Legal Intern", category="Legal",
+                  date_posted=now - timedelta(days=400))
+    last_year = Posting(id="ly", source="t", company="B", title=f"{now.year - 1} Opportunity Intern",
+                        category="Legal")
+    fresh = Posting(id="new", source="t", company="C", title=f"{now.year + 1} Legal Intern", category="Legal")
+    matches, excluded = rank([old, last_year, fresh], candidate(prelaw_text, Profile()))
+    assert [m.posting.id for m in matches] == ["new"]
+    assert excluded["stale"] == 1 and excluded["closed"] == 1
+
+
+def test_generic_skills_dont_make_a_role_a_fit(prelaw_text):
+    generic = ("Use Microsoft Office, Excel and PowerPoint; strong writing, research and communication skills; "
+               "customer service and data entry; project management.")
+    ops = Posting(id="ops", source="t", company="A", title="Operations Analyst Intern", category="Consulting & Business",
+                  description=generic)
+    legal = Posting(id="legal", source="t", company="B", title="Legal Intern", category="Legal",
+                    description="Legal research on Westlaw and LexisNexis; draft legal memos; Bluebook citations.")
+    matches, _ = rank([ops, legal], candidate(prelaw_text, Profile()))
+    by_id = {m.posting.id: m for m in matches}
+    assert by_id["legal"].match_score > by_id["ops"].match_score + 25
+    assert by_id["ops"].tier != "Likely"
+
+
 def test_underclassmen_get_early_programs(postings, weak_text):
     prof = Profile(degree_level="bachelor", grad_year=2030)
     matches, excluded = rank(postings, candidate(weak_text, prof))
